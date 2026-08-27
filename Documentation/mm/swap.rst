@@ -61,10 +61,10 @@ write path.  ``queued`` means that ``__swap_writepage()`` accepted the folio,
 ``submitted`` is emitted immediately before the block bio or filesystem
 ``swap_rw`` request is handed to its lower layer, and ``completed`` is emitted
 from the corresponding completion path.  Zero ``error`` denotes the expected
-completion; a non-zero value reports a block error or a filesystem return
-which did not equal the requested length.  Block-device submissions and
-filesystem batching differ, so ``submitted`` is not proof that a backend has
-already accepted or started the I/O.
+completion; a non-zero value reports a block error, a negative filesystem
+error, or ``-EIO`` for a non-negative short filesystem completion.
+Block-device submissions and filesystem batching differ, so ``submitted`` is
+not proof that a backend has already accepted or started the I/O.
 
 The swap type and offset correlate an allocation with write events while that
 entry remains allocated; ``order`` and ``nr_pages`` describe the respective

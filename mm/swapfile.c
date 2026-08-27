@@ -1361,7 +1361,7 @@ static bool get_swap_device_info(struct swap_info_struct *si)
 
 static bool swap_area_eligible(struct swap_info_struct *si)
 {
-	if (!(si->flags & SWP_OFFLOAD_ONLY))
+	if (!(READ_ONCE(si->flags) & SWP_OFFLOAD_ONLY))
 		return true;
 
 	return current_is_proactive_reclaim();
@@ -1826,7 +1826,8 @@ again:
 		trace_mm_vmscan_swap_alloc(swp_type(folio->swap),
 					   swp_offset(folio->swap), order,
 					   current_is_proactive_reclaim(),
-					   si->flags & SWP_OFFLOAD_ONLY);
+					   READ_ONCE(si->flags) &
+					   SWP_OFFLOAD_ONLY);
 	}
 
 	return 0;

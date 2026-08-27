@@ -47,7 +47,8 @@ static __always_inline void trace_swap_write(struct folio *folio,
 
 	trace_mm_vmscan_swap_write(sis->type, swp_offset(folio->swap),
 				    folio_nr_pages(folio),
-				    sis->flags & SWP_OFFLOAD_ONLY, stage, error);
+				    READ_ONCE(sis->flags) & SWP_OFFLOAD_ONLY,
+				    stage, error);
 }
 
 static void __end_swap_bio_write(struct bio *bio)
@@ -313,7 +314,7 @@ int swap_writeout(struct folio *folio, struct swap_iocb **swap_plug)
 	 * shrinker workqueue.  Do not let it defer an offload-only backend write
 	 * beyond the proactive reclaim context which admitted the swap slot.
 	 */
-	if (!(sis->flags & SWP_OFFLOAD_ONLY) && zswap_store(folio)) {
+	if (!(READ_ONCE(sis->flags) & SWP_OFFLOAD_ONLY) && zswap_store(folio)) {
 		count_mthp_stat(folio_order(folio), MTHP_STAT_ZSWPOUT);
 		goto out_unlock;
 	}
@@ -395,9 +396,11 @@ static void sio_write_complete(struct kiocb *iocb, long ret)
 {
 	struct swap_iocb *sio = container_of(iocb, struct swap_iocb, iocb);
 	struct page *page = sio->bvecs[0].bv_page;
+	int error = 0;
 	int p;
 
 	if (ret != sio->len) {
+		error = ret < 0 ? ret : -EIO;
 		/*
 		 * In the case of swap-over-nfs, this can be a
 		 * temporary failure if the system has limited
@@ -417,8 +420,7 @@ static void sio_write_complete(struct kiocb *iocb, long ret)
 
 	for (p = 0; p < sio->nr_bvecs; p++)
 		trace_swap_write(bvec_folio(&sio->bvecs[p]),
-				 SWAP_WRITE_COMPLETED,
-				 ret == sio->len ? 0 : ret);
+				 SWAP_WRITE_COMPLETED, error);
 
 	for (p = 0; p < sio->nr_bvecs; p++)
 		end_page_writeback(sio->bvecs[p].bv_page);
