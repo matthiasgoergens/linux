@@ -25,10 +25,12 @@ struct bio;
 #define SWAP_FLAG_DISCARD	0x10000 /* enable discard for swap */
 #define SWAP_FLAG_DISCARD_ONCE	0x20000 /* discard swap area at swapon-time */
 #define SWAP_FLAG_DISCARD_PAGES 0x40000 /* discard page-clusters after use */
+#define SWAP_FLAG_OFFLOAD_ONLY  0x80000 /* only use for proactive reclaim */
 
 #define SWAP_FLAGS_VALID	(SWAP_FLAG_PRIO_MASK | SWAP_FLAG_PREFER | \
 				 SWAP_FLAG_DISCARD | SWAP_FLAG_DISCARD_ONCE | \
-				 SWAP_FLAG_DISCARD_PAGES)
+				 SWAP_FLAG_DISCARD_PAGES | SWAP_FLAG_OFFLOAD_ONLY)
+
 #define SWAP_BATCH 64
 
 static inline int current_is_kswapd(void)
@@ -151,11 +153,18 @@ union swap_header {
 struct reclaim_state {
 	/* pages reclaimed outside of LRU-based reclaim */
 	unsigned long reclaimed;
+	/* reclaim was explicitly requested by userspace */
+	bool proactive;
 #ifdef CONFIG_LRU_GEN
 	/* per-thread mm walk data */
 	struct lru_gen_mm_walk *mm_walk;
 #endif
 };
+
+static inline bool current_is_proactive_reclaim(void)
+{
+	return current->reclaim_state && current->reclaim_state->proactive;
+}
 
 /*
  * mm_account_reclaimed_pages(): account reclaimed pages outside of LRU-based
@@ -214,6 +223,7 @@ enum {
 	SWP_STABLE_WRITES = (1 << 11),	/* no overwrite PG_writeback pages */
 	SWP_SYNCHRONOUS_IO = (1 << 12),	/* synchronous IO is efficient */
 	SWP_HIBERNATION = (1 << 13),	/* pinned for hibernation */
+	SWP_OFFLOAD_ONLY = (1 << 14),	/* only allocate during proactive reclaim */
 					/* add others here before... */
 };
 
@@ -432,6 +442,8 @@ static inline long get_nr_swap_pages(void)
 	return atomic_long_read(&nr_swap_pages);
 }
 
+long get_nr_swap_pages_eligible(void);
+
 extern void si_swapinfo(struct sysinfo *);
 extern int pin_hibernation_swap_type(dev_t device, sector_t offset);
 extern void unpin_hibernation_swap_type(int type);
@@ -485,6 +497,7 @@ static inline void put_swap_device(struct swap_info_struct *si)
 }
 
 #define get_nr_swap_pages()			0L
+#define get_nr_swap_pages_eligible()		0L
 #define total_swap_pages			0L
 #define total_swapcache_pages()			0UL
 #define vm_swap_full()				0
@@ -604,7 +617,7 @@ static inline void mem_cgroup_uncharge_swap(unsigned short id,
 
 static inline long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg)
 {
-	return get_nr_swap_pages();
+	return get_nr_swap_pages_eligible();
 }
 
 static inline bool mem_cgroup_swap_full(struct folio *folio)

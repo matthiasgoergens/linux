@@ -5650,7 +5650,7 @@ void __mem_cgroup_uncharge_swap(unsigned short id, unsigned int nr_pages)
 
 long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg)
 {
-	long nr_swap_pages = get_nr_swap_pages();
+	long nr_swap_pages = get_nr_swap_pages_eligible();
 
 	if (mem_cgroup_disabled() || do_memsw_account())
 		return nr_swap_pages;
