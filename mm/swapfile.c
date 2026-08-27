@@ -1354,6 +1354,14 @@ static bool get_swap_device_info(struct swap_info_struct *si)
 	return true;
 }
 
+static bool swap_device_eligible(struct swap_info_struct *si)
+{
+	if (!(si->flags & SWP_OFFLOAD_ONLY))
+		return true;
+
+	return current_is_proactive_reclaim();
+}
+
 /*
  * Fast path try to get swap entries with specified order from current
  * CPU's swap entry pool (a cluster).
@@ -1373,6 +1381,10 @@ static bool swap_alloc_fast(struct folio *folio)
 	offset = this_cpu_read(percpu_swap_cluster.offset[order]);
 	if (!si || !offset || !get_swap_device_info(si))
 		return false;
+	if (!swap_device_eligible(si)) {
+		put_swap_device(si);
+		return false;
+	}
 
 	ci = swap_cluster_lock(si, offset);
 	if (cluster_is_usable(ci, order)) {
@@ -1395,6 +1407,9 @@ static void swap_alloc_slow(struct folio *folio)
 	spin_lock(&swap_avail_lock);
 start_over:
 	plist_for_each_entry_safe(si, next, &swap_avail_head, avail_list) {
+		if (!swap_device_eligible(si))
+			continue;
+
 		/* Rotate the device and switch to a new cluster */
 		plist_requeue(&si->avail_list, &swap_avail_head);
 		spin_unlock(&swap_avail_lock);
@@ -3712,6 +3727,9 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		atomic_inc(&nr_rotate_swap);
 		inced_nr_rotate_swap = true;
 	}
+
+	if (swap_flags & SWAP_FLAG_OFFLOAD_ONLY)
+		si->flags |= SWP_OFFLOAD_ONLY;
 
 	if ((swap_flags & SWAP_FLAG_DISCARD) &&
 	    si->bdev && bdev_max_discard_sectors(si->bdev)) {
