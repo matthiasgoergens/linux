@@ -35,7 +35,8 @@ enum swap_write_stage {
 	SWAP_WRITE_COMPLETED,
 };
 
-static void trace_swap_write(struct folio *folio, unsigned int stage, int error)
+static __always_inline void trace_swap_write(struct folio *folio,
+					     unsigned int stage, int error)
 {
 	struct swap_info_struct *sis = __swap_entry_to_info(folio->swap);
 
