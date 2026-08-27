@@ -26,8 +26,43 @@
 #include <linux/delayacct.h>
 #include <linux/zswap.h>
 #include <linux/swap_ops.h>
+#include <trace/events/vmscan.h>
 #include "swap.h"
 #include "swap_table.h"
+
+enum swap_write_stage {
+	SWAP_WRITE_QUEUED,
+	SWAP_WRITE_SUBMITTED,
+	SWAP_WRITE_COMPLETED,
+};
+
+static __always_inline void trace_swap_write(struct folio *folio,
+		unsigned int stage, int error)
+{
+	struct swap_info_struct *sis;
+
+	if (!trace_mm_vmscan_swap_write_enabled())
+		return;
+
+	sis = __swap_entry_to_info(folio->swap);
+
+	trace_mm_vmscan_swap_write(sis->type, swp_offset(folio->swap),
+			folio_nr_pages(folio),
+			READ_ONCE(sis->flags) & SWP_OFFLOAD_ONLY,
+			stage, error);
+}
+
+static void trace_swap_write_iocb(struct swap_iocb *sio,
+		unsigned int stage, int error)
+{
+	int p;
+
+	if (!trace_mm_vmscan_swap_write_enabled())
+		return;
+
+	for (p = 0; p < sio->nr_bvecs; p++)
+		trace_swap_write(bvec_folio(&sio->bvecs[p]), stage, error);
+}
 
 int generic_swapfile_activate(struct swap_info_struct *sis,
 				struct file *swap_file,
@@ -203,6 +238,7 @@ static void swap_zeromap_folio_clear(struct folio *folio)
  */
 int swap_writeout(struct swap_io_ctx *ctx, struct folio *folio)
 {
+	struct swap_info_struct *sis = __swap_entry_to_info(folio->swap);
 	int ret = 0;
 
 	if (folio_free_swap(folio))
@@ -235,7 +271,12 @@ int swap_writeout(struct swap_io_ctx *ctx, struct folio *folio)
 	 */
 	swap_zeromap_folio_clear(folio);
 
-	if (zswap_store(folio)) {
+	/*
+	 * Zswap writeback can happen much later from pressure reclaim or its
+	 * shrinker workqueue.  Do not let it defer an offload-only backend write
+	 * beyond the proactive reclaim context which admitted the swap slot.
+	 */
+	if (!(READ_ONCE(sis->flags) & SWP_OFFLOAD_ONLY) && zswap_store(folio)) {
 		count_mthp_stat(folio_order(folio), MTHP_STAT_ZSWPOUT);
 		goto out_unlock;
 	}
@@ -370,6 +411,7 @@ static void swap_add_folio(struct swap_io_ctx *ctx, struct folio *folio, int rw)
 void __swap_writepage(struct swap_io_ctx *ctx, struct folio *folio)
 {
 	VM_BUG_ON_FOLIO(!folio_test_swapcache(folio), folio);
+	trace_swap_write(folio, SWAP_WRITE_QUEUED, 0);
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	if (unlikely(folio_test_pmd_mappable(folio))) {
@@ -492,9 +534,12 @@ finish:
 	delayacct_swapin_end();
 }
 
-static void swap_write_end(struct swap_iocb *sio, bool failed)
+static void swap_write_end(struct swap_iocb *sio, int error)
 {
+	bool failed = error;
 	int p;
+
+	trace_swap_write_iocb(sio, SWAP_WRITE_COMPLETED, error);
 
 	for (p = 0; p < sio->nr_bvecs; p++) {
 		struct page *page = sio->bvecs[p].bv_page;
@@ -511,9 +556,12 @@ static void swap_write_end(struct swap_iocb *sio, bool failed)
 static void swap_fs_write_complete(struct kiocb *iocb, long ret)
 {
 	struct swap_iocb *sio = container_of(iocb, struct swap_iocb, iocb);
-	bool failed = ret != sio->len;
+	int error = 0;
 
-	if (failed) {
+	if (ret != sio->len)
+		error = ret < 0 ? ret : -EIO;
+
+	if (error) {
 		struct page *page = sio->bvecs[0].bv_page;
 
 		/*
@@ -526,20 +574,20 @@ static void swap_fs_write_complete(struct kiocb *iocb, long ret)
 				   ret, swap_dev_pos(page_swap_entry(page)));
 	}
 
-	swap_write_end(sio, failed);
+	swap_write_end(sio, error);
 }
 
 static void end_swap_bio_write(struct bio *bio)
 {
 	struct swap_iocb *sio = container_of(bio, struct swap_iocb, bio);
-	bool failed = !!bio->bi_status;
+	int error = blk_status_to_errno(bio->bi_status);
 
-	if (failed)
+	if (error)
 		pr_alert_ratelimited("Write-error on swap-device (%u:%u:%llu)\n",
 				     MAJOR(bio_dev(bio)), MINOR(bio_dev(bio)),
 				     (unsigned long long)bio->bi_iter.bi_sector);
 	bio_uninit(bio);
-	swap_write_end(sio, failed);
+	swap_write_end(sio, error);
 }
 
 static void swap_read_end(struct swap_iocb *sio, bool failed)
@@ -686,6 +734,7 @@ void swap_write_submit(struct swap_io_ctx *ctx)
 	if (!ctx->sio)
 		return;
 	count_vm_events(NRSWPOUT, 1);
+	trace_swap_write_iocb(ctx->sio, SWAP_WRITE_SUBMITTED, 0);
 	ctx->sis->ops->submit_write(ctx);
 	ctx->sio = NULL;
 	ctx->sis = NULL;

@@ -1367,7 +1367,7 @@ static bool get_swap_device_info(struct swap_info_struct *si)
 
 static bool swap_area_eligible(struct swap_info_struct *si)
 {
-	if (!(si->flags & SWP_OFFLOAD_ONLY))
+	if (!(READ_ONCE(si->flags) & SWP_OFFLOAD_ONLY))
 		return true;
 
 	return current_is_proactive_reclaim();
@@ -1824,13 +1824,21 @@ again:
 		swap_cache_del_folio(folio);
 
 	if (unlikely(!folio_test_swapcache(folio))) {
-		trace_mm_vmscan_swap_alloc(-1, order,
-					   current_is_proactive_reclaim());
+		trace_mm_vmscan_swap_alloc(-1, 0, order,
+					   current_is_proactive_reclaim(), false);
 		return -ENOMEM;
 	}
 
-	trace_mm_vmscan_swap_alloc(swp_type(folio->swap), order,
-				   current_is_proactive_reclaim());
+	if (trace_mm_vmscan_swap_alloc_enabled()) {
+		struct swap_info_struct *si;
+
+		si = __swap_entry_to_info(folio->swap);
+		trace_mm_vmscan_swap_alloc(swp_type(folio->swap),
+					   swp_offset(folio->swap), order,
+					   current_is_proactive_reclaim(),
+					   READ_ONCE(si->flags) &
+					   SWP_OFFLOAD_ONLY);
+	}
 
 	return 0;
 }

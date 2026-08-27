@@ -52,5 +52,23 @@ and the existing reclaim and OOM policy applies.
 
 The ``mm_vmscan_swap_area_skip`` tracepoint records an offload-only area
 rejected by either allocator path.  ``mm_vmscan_swap_alloc`` records the
-selected swap type, allocation order, and reclaim mode; a type of ``-1`` means
-that no eligible slot was allocated.
+selected swap type, offset, allocation order, reclaim mode, and whether the
+selected area is offload-only; a type of ``-1`` means that no eligible slot was
+allocated.
+
+``mm_vmscan_swap_write`` follows an allocated swap-cache folio through the
+write path.  ``queued`` means that ``__swap_writepage()`` accepted the folio,
+``submitted`` is emitted immediately before the batch is handed to the
+selected area's registered ``swap_ops`` write callback, and ``completed`` is
+emitted from the corresponding completion path.  Zero ``error`` denotes the
+expected completion; a non-zero value reports a block error, a negative
+filesystem error, or ``-EIO`` for a non-negative short filesystem completion.
+Block-device and filesystem callbacks submit I/O differently, so ``submitted``
+is not proof that a backend has already accepted or started the I/O.
+
+The swap type and offset correlate an allocation with write events while that
+entry remains allocated; ``order`` and ``nr_pages`` describe the respective
+extent.  The tuple is not a permanent identifier and can be reused after an
+entry is freed.  These events expose the allocation-to-completion population
+for measurement.  They do not reserve backend resources or turn the policy
+into a forward-progress guarantee.
