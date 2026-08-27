@@ -684,24 +684,65 @@ TRACE_EVENT(mm_vmscan_swap_area_skip,
 
 TRACE_EVENT(mm_vmscan_swap_alloc,
 
-	TP_PROTO(int type, unsigned int order, bool proactive),
+	TP_PROTO(int type, unsigned long offset, unsigned int order,
+		 bool proactive, bool offload_only),
 
-	TP_ARGS(type, order, proactive),
+	TP_ARGS(type, offset, order, proactive, offload_only),
 
 	TP_STRUCT__entry(
 		__field(int, type)
+		__field(unsigned long, offset)
 		__field(unsigned int, order)
 		__field(bool, proactive)
+		__field(bool, offload_only)
 	),
 
 	TP_fast_assign(
 		__entry->type = type;
+		__entry->offset = offset;
 		__entry->order = order;
 		__entry->proactive = proactive;
+		__entry->offload_only = offload_only;
 	),
 
-	TP_printk("type=%d order=%u proactive=%d",
-		__entry->type, __entry->order, __entry->proactive)
+	TP_printk("type=%d offset=%lu order=%u proactive=%d offload_only=%d",
+		__entry->type, __entry->offset, __entry->order,
+		__entry->proactive, __entry->offload_only)
+);
+
+TRACE_EVENT(mm_vmscan_swap_write,
+
+	TP_PROTO(int type, unsigned long offset, unsigned int nr_pages,
+		 bool offload_only, unsigned int stage, int error),
+
+	TP_ARGS(type, offset, nr_pages, offload_only, stage, error),
+
+	TP_STRUCT__entry(
+		__field(int, type)
+		__field(unsigned long, offset)
+		__field(unsigned int, nr_pages)
+		__field(bool, offload_only)
+		__field(unsigned int, stage)
+		__field(int, error)
+	),
+
+	TP_fast_assign(
+		__entry->type = type;
+		__entry->offset = offset;
+		__entry->nr_pages = nr_pages;
+		__entry->offload_only = offload_only;
+		__entry->stage = stage;
+		__entry->error = error;
+	),
+
+	TP_printk("type=%d offset=%lu nr_pages=%u offload_only=%d stage=%s error=%d",
+		__entry->type, __entry->offset, __entry->nr_pages,
+		__entry->offload_only,
+		__print_symbolic(__entry->stage,
+			{ 0, "queued" },
+			{ 1, "submitted" },
+			{ 2, "completed" }),
+		__entry->error)
 );
 #endif /* _TRACE_VMSCAN_H */
 
