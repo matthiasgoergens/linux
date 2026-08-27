@@ -50,7 +50,7 @@ static int join_cgroup(const char *procs)
 static int allocate(const char *size_arg, const char *procs,
 		    const char *ready)
 {
-	volatile char *memory;
+	char *memory;
 	unsigned long size;
 	char *end;
 	int fd;
@@ -73,6 +73,10 @@ static int allocate(const char *size_arg, const char *procs,
 
 	for (unsigned long i = 0; i < size; i += getpagesize())
 		memory[i] = 1;
+	if (mprotect(memory, size, PROT_READ)) {
+		perror("mprotect");
+		return 1;
+	}
 
 	fd = open(ready, O_WRONLY | O_CREAT | O_EXCL, 0600);
 	if (fd < 0) {
@@ -92,8 +96,7 @@ int main(int argc, char **argv)
 	if (argc == 5 && !strcmp(argv[1], "allocate"))
 		return allocate(argv[2], argv[3], argv[4]);
 
-	fprintf(stderr,
-		"usage: %s activate DEVICE PRIORITY | "
-		"allocate BYTES CGROUP.PROCS READY\n", argv[0]);
+	fprintf(stderr, "usage: %s activate DEVICE PRIORITY | allocate BYTES CGROUP.PROCS READY\n",
+		argv[0]);
 	return 1;
 }
