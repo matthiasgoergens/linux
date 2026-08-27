@@ -13,6 +13,25 @@ The swap allocator excludes such an area from kswapd, direct reclaim, and
 other pressure-driven swap allocation.  Normal swap priority ordering still
 applies among the areas eligible for the current reclaim context.
 
+This permits a system to combine a small conventional swap area, which is
+engineered for forward progress in emergency reclaim, with a larger or more
+complex area used for ordinary cold-page offload.  For example, the latter may
+be RAM-compressed or may use a filesystem with compression, checksums, or
+redundancy.  Making every such write path safe in direct reclaim can require
+backend-specific reserves, preallocation, non-blocking allocation, and
+recursion rules.  Excluding new pressure-reclaim writes can reduce that
+requirement and its complexity.
+
+For a RAM-compressed area such as zram, unused logical slots also do not imply
+that enough physical memory remains to store their future contents.  Static
+swap priority cannot express that distinction or provide late fallback after a
+selected area's write fails.
+
+The policy is attached to one activated swap area, not to its underlying
+physical storage.  A raw swap partition and a filesystem swapfile on the same
+device are separate areas and may use different policies.  The kernel does not
+infer this policy from the block driver, filesystem, or swap priority.
+
 This is a reclaim-provenance policy, not a measurement of current memory
 headroom.  Userspace should only request proactive offload while its own
 watermark or PSI policy considers memory pressure low.
