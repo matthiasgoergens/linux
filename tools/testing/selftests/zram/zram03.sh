@@ -55,6 +55,14 @@ check_prereqs
 [ -e /sys/fs/cgroup/cgroup.controllers ] || skip "cgroup v2 controllers are unavailable"
 grep -qw memory /sys/fs/cgroup/cgroup.controllers || skip "memory controller is unavailable"
 
+# Swap priorities are global. Put both test areas ahead of any existing swap
+# so distro-managed zram or another high-priority area cannot absorb the test
+# allocations and make the routing assertions fail spuriously.
+max_prio=$(awk 'BEGIN { max = -1 } NR > 1 && $5 > max { max = $5 } END { print max }' /proc/swaps)
+[ "$max_prio" -le 32765 ] || skip "cannot outrank existing swap priority $max_prio"
+safe_prio=$((max_prio + 1))
+offload_prio=$((max_prio + 2))
+
 dev_num=2
 zram_sizes="67108864 67108864"
 zram_load
@@ -65,9 +73,9 @@ safe="/dev/zram${dev_start}"
 offload="/dev/zram$((dev_start + 1))"
 mkswap "$safe" >/dev/null
 mkswap "$offload" >/dev/null
-swapon -p 10 "$safe"
+swapon -p "$safe_prio" "$safe"
 dev_makeswap=$dev_start
-./swap_offload activate "$offload" 20
+./swap_offload activate "$offload" "$offload_prio"
 dev_makeswap=$dev_end
 
 echo +memory > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
@@ -83,7 +91,7 @@ echo "16M swappiness=max" > "$cg/memory.reclaim" ||
 offload_before=$(swap_used_kb "$offload")
 safe_before=$(swap_used_kb "$safe")
 [ "${offload_before:-0}" -gt 0 ] || fail "proactive reclaim missed offload area"
-[ "${safe_before:-0}" -eq 0 ] || fail "proactive reclaim ignored higher priority"
+[ "${safe_before:-0}" -eq 0 ] || fail "proactive reclaim used lower-priority safe area"
 
 echo 24M > "$cg/memory.max"
 sleep 1
