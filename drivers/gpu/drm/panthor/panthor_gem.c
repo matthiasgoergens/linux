@@ -1349,7 +1349,7 @@ err_free_kbo:
 
 static bool can_swap(void)
 {
-	return get_nr_swap_pages() > 0;
+	return get_nr_swap_pages_eligible() > 0;
 }
 
 static bool can_block(struct shrink_control *sc)

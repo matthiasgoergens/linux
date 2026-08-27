@@ -356,8 +356,7 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 			return true;
 	} else {
 		/* Is the memcg below its swap limit? */
-		if (min(mem_cgroup_get_nr_swap_pages(memcg),
-			get_nr_swap_pages_eligible()) > 0)
+		if (mem_cgroup_get_nr_swap_pages(memcg) > 0)
 			return true;
 	}
 
@@ -2708,8 +2707,7 @@ static int get_swappiness(struct lruvec *lruvec, struct scan_control *sc)
 		return 0;
 
 	if (!can_demote(pgdat->node_id, sc, memcg) &&
-	    min(mem_cgroup_get_nr_swap_pages(memcg),
-		get_nr_swap_pages_eligible()) < MIN_LRU_BATCH)
+	    mem_cgroup_get_nr_swap_pages(memcg) < MIN_LRU_BATCH)
 		return 0;
 
 	return sc_swappiness(sc, memcg);

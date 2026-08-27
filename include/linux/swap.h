@@ -616,7 +616,7 @@ static inline void mem_cgroup_uncharge_swap(unsigned short id,
 
 static inline long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg)
 {
-	return get_nr_swap_pages();
+	return get_nr_swap_pages_eligible();
 }
 
 static inline bool mem_cgroup_swap_full(struct folio *folio)

@@ -68,11 +68,7 @@ static DEFINE_SPINLOCK(swap_lock);
 static unsigned int nr_swapfiles;
 atomic_long_t nr_swap_pages;
 static atomic_long_t nr_swap_pages_reclaim_safe;
-/*
- * Some modules use swappable objects and may try to swap them out under
- * memory pressure (via the shrinker). Before doing so, they may wish to
- * check to see if any swap space is available.
- */
+/* Raw free-space counter retained for accounting users. */
 EXPORT_SYMBOL_GPL(nr_swap_pages);
 /* protected with swap_lock. reading in vm_swap_full() doesn't need lock */
 long total_swap_pages;
@@ -1371,6 +1367,10 @@ static bool swap_area_eligible(struct swap_info_struct *si)
 	return current_is_proactive_reclaim();
 }
 
+/*
+ * Return swap capacity that the current allocation context may use.
+ * Reclaim decisions must use this rather than the raw nr_swap_pages counter.
+ */
 long get_nr_swap_pages_eligible(void)
 {
 	if (current_is_proactive_reclaim())
@@ -1378,6 +1378,7 @@ long get_nr_swap_pages_eligible(void)
 
 	return atomic_long_read(&nr_swap_pages_reclaim_safe);
 }
+EXPORT_SYMBOL_GPL(get_nr_swap_pages_eligible);
 
 /*
  * Fast path try to get swap entries with specified order from current
