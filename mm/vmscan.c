@@ -271,14 +271,18 @@ static inline bool is_exec_file_folio(const struct folio *folio,
 }
 
 static void set_task_reclaim_state(struct task_struct *task,
-				   struct reclaim_state *rs)
+				   struct scan_control *sc)
 {
+	struct reclaim_state *rs = sc ? &sc->reclaim_state : NULL;
+
 	/* Check for an overwrite */
 	WARN_ON_ONCE(rs && task->reclaim_state);
 
 	/* Check for the nulling of an already-nulled member */
 	WARN_ON_ONCE(!rs && !task->reclaim_state);
 
+	if (rs)
+		rs->proactive = sc->proactive;
 	task->reclaim_state = rs;
 }
 
@@ -351,7 +355,7 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 		 * For non-memcg reclaim, is there
 		 * space in any swap device?
 		 */
-		if (get_nr_swap_pages() > 0)
+		if (get_nr_swap_pages_eligible() > 0)
 			return true;
 	} else {
 		/* Is the memcg below its swap limit? */
@@ -5774,7 +5778,7 @@ static ssize_t lru_gen_seq_write(struct file *file, const char __user *src,
 		return -EFAULT;
 	}
 
-	set_task_reclaim_state(current, &sc.reclaim_state);
+	set_task_reclaim_state(current, &sc);
 	flags = memalloc_noreclaim_save();
 	blk_start_plug(&plug);
 	if (!set_mm_walk(NULL, true)) {
@@ -6798,7 +6802,7 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	if (throttle_direct_reclaim(sc.gfp_mask, zonelist, nodemask))
 		return 1;
 
-	set_task_reclaim_state(current, &sc.reclaim_state);
+	set_task_reclaim_state(current, &sc);
 	trace_mm_vmscan_direct_reclaim_begin(sc.gfp_mask, order, NULL);
 
 	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
@@ -6880,7 +6884,7 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 	 */
 	struct zonelist *zonelist = node_zonelist(numa_node_id(), sc.gfp_mask);
 
-	set_task_reclaim_state(current, &sc.reclaim_state);
+	set_task_reclaim_state(current, &sc);
 	trace_mm_vmscan_memcg_reclaim_begin(sc.gfp_mask, 0, memcg);
 	noreclaim_flag = memalloc_noreclaim_save();
 
@@ -7172,7 +7176,7 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
 
 	trace_mm_vmscan_balance_pgdat_begin(pgdat->node_id, order,
 					    highest_zoneidx);
-	set_task_reclaim_state(current, &sc.reclaim_state);
+	set_task_reclaim_state(current, &sc);
 	psi_memstall_enter(&pflags);
 	__fs_reclaim_acquire(_THIS_IP_);
 
@@ -7668,7 +7672,7 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 
 	fs_reclaim_acquire(sc.gfp_mask);
 	noreclaim_flag = memalloc_noreclaim_save();
-	set_task_reclaim_state(current, &sc.reclaim_state);
+	set_task_reclaim_state(current, &sc);
 
 	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
 
@@ -7849,7 +7853,7 @@ static unsigned long __node_reclaim(struct pglist_data *pgdat,
 	 * We need to be able to allocate from the reserves for RECLAIM_UNMAP
 	 */
 	noreclaim_flag = memalloc_noreclaim_save();
-	set_task_reclaim_state(p, &sc->reclaim_state);
+	set_task_reclaim_state(p, sc);
 
 	if (node_pagecache_reclaimable(pgdat) > pgdat->min_unmapped_pages ||
 	    node_page_state_pages(pgdat, NR_SLAB_RECLAIMABLE_B) > pgdat->min_slab_pages) {
