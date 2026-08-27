@@ -2256,7 +2256,8 @@ static int __find_hibernation_swap_type(dev_t device, sector_t offset)
 	for (type = 0; type < nr_swapfiles; type++) {
 		struct swap_info_struct *sis = swap_info[type];
 
-		if (!(sis->flags & SWP_WRITEOK))
+		if (!(sis->flags & SWP_WRITEOK) ||
+		    (sis->flags & SWP_OFFLOAD_ONLY))
 			continue;
 
 		if (device == sis->bdev->bd_dev) {
@@ -2382,7 +2383,8 @@ int find_first_swap(dev_t *device)
 	for (type = 0; type < nr_swapfiles; type++) {
 		struct swap_info_struct *sis = swap_info[type];
 
-		if (!(sis->flags & SWP_WRITEOK))
+		if (!(sis->flags & SWP_WRITEOK) ||
+		    (sis->flags & SWP_OFFLOAD_ONLY))
 			continue;
 		*device = sis->bdev->bd_dev;
 		spin_unlock(&swap_lock);
@@ -2422,7 +2424,8 @@ unsigned int count_swap_pages(int type, int free)
 		struct swap_info_struct *sis = swap_info[type];
 
 		spin_lock(&sis->lock);
-		if (sis->flags & SWP_WRITEOK) {
+		if ((sis->flags & SWP_WRITEOK) &&
+		    !(sis->flags & SWP_OFFLOAD_ONLY)) {
 			n = sis->pages;
 			if (free)
 				n -= swap_usage_in_pages(sis);
