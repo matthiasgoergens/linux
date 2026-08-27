@@ -11,6 +11,7 @@ TCID="zram03"
 cg="/sys/fs/cgroup/zram-offload-$$"
 ready="/tmp/zram-offload-ready-$$"
 allocator_pid=""
+zswap_enabled=""
 
 fail()
 {
@@ -34,11 +35,19 @@ cleanup()
 	rm -f "$ready"
 	rmdir "$cg"
 	zram_cleanup
+	if [ -n "$zswap_enabled" ]; then
+		echo "$zswap_enabled" > /sys/module/zswap/parameters/enabled
+	fi
 }
 
 swap_used_kb()
 {
 	awk -v device="$1" '$1 == device { print $4 }' /proc/swaps
+}
+
+zram_orig_data_size()
+{
+	awk '{ print $1 }' "/sys/block/${1##*/}/mm_stat"
 }
 
 wait_ready()
@@ -54,6 +63,8 @@ check_prereqs
 [ -x ./swap_offload ] || skip "swap_offload helper is unavailable"
 [ -e /sys/fs/cgroup/cgroup.controllers ] || skip "cgroup v2 controllers are unavailable"
 grep -qw memory /sys/fs/cgroup/cgroup.controllers || skip "memory controller is unavailable"
+[ -e /sys/module/zswap/parameters/enabled ] || skip "zswap is unavailable"
+zswap_enabled=$(cat /sys/module/zswap/parameters/enabled)
 
 # Swap priorities are global. Put both test areas ahead of any existing swap
 # so distro-managed zram or another high-priority area cannot absorb the test
@@ -67,6 +78,7 @@ dev_num=2
 zram_sizes="67108864 67108864"
 zram_load
 trap cleanup EXIT
+echo Y > /sys/module/zswap/parameters/enabled || skip "cannot enable zswap"
 zram_set_disksizes
 
 safe="/dev/zram${dev_start}"
@@ -90,8 +102,11 @@ echo "16M swappiness=max" > "$cg/memory.reclaim" ||
 	fail "proactive reclaim failed"
 offload_before=$(swap_used_kb "$offload")
 safe_before=$(swap_used_kb "$safe")
+offload_orig=$(zram_orig_data_size "$offload")
 [ "${offload_before:-0}" -gt 0 ] || fail "proactive reclaim missed offload area"
 [ "${safe_before:-0}" -eq 0 ] || fail "proactive reclaim used lower-priority safe area"
+[ "$offload_orig" -ge "$((offload_before * 1024))" ] ||
+	fail "zswap deferred the offload-only backend write"
 
 echo 24M > "$cg/memory.max"
 sleep 1

@@ -25,12 +25,31 @@
 #include <linux/sched/task.h>
 #include <linux/delayacct.h>
 #include <linux/zswap.h>
+#include <trace/events/vmscan.h>
 #include "swap.h"
 #include "swap_table.h"
+
+enum swap_write_stage {
+	SWAP_WRITE_QUEUED,
+	SWAP_WRITE_SUBMITTED,
+	SWAP_WRITE_COMPLETED,
+};
+
+static void trace_swap_write(struct folio *folio, unsigned int stage, int error)
+{
+	struct swap_info_struct *sis = __swap_entry_to_info(folio->swap);
+
+	trace_mm_vmscan_swap_write(sis->type, swp_offset(folio->swap),
+				    folio_nr_pages(folio),
+				    sis->flags & SWP_OFFLOAD_ONLY, stage, error);
+}
 
 static void __end_swap_bio_write(struct bio *bio)
 {
 	struct folio *folio = bio_first_folio_all(bio);
+	int error = blk_status_to_errno(bio->bi_status);
+
+	trace_swap_write(folio, SWAP_WRITE_COMPLETED, error);
 
 	if (bio->bi_status) {
 		/*
@@ -250,6 +269,7 @@ static void swap_zeromap_folio_clear(struct folio *folio)
  */
 int swap_writeout(struct folio *folio, struct swap_iocb **swap_plug)
 {
+	struct swap_info_struct *sis = __swap_entry_to_info(folio->swap);
 	int ret = 0;
 
 	if (folio_free_swap(folio))
@@ -282,7 +302,12 @@ int swap_writeout(struct folio *folio, struct swap_iocb **swap_plug)
 	 */
 	swap_zeromap_folio_clear(folio);
 
-	if (zswap_store(folio)) {
+	/*
+	 * Zswap writeback can happen much later from pressure reclaim or its
+	 * shrinker workqueue.  Do not let it defer an offload-only backend write
+	 * beyond the proactive reclaim context which admitted the swap slot.
+	 */
+	if (!(sis->flags & SWP_OFFLOAD_ONLY) && zswap_store(folio)) {
 		count_mthp_stat(folio_order(folio), MTHP_STAT_ZSWPOUT);
 		goto out_unlock;
 	}
@@ -385,6 +410,11 @@ static void sio_write_complete(struct kiocb *iocb, long ret)
 	}
 
 	for (p = 0; p < sio->nr_bvecs; p++)
+		trace_swap_write(bvec_folio(&sio->bvecs[p]),
+				 SWAP_WRITE_COMPLETED,
+				 ret == sio->len ? 0 : ret);
+
+	for (p = 0; p < sio->nr_bvecs; p++)
 		end_page_writeback(sio->bvecs[p].bv_page);
 
 	mempool_free(sio, sio_pool);
@@ -441,6 +471,7 @@ static void swap_writepage_bdev_sync(struct folio *folio,
 
 	folio_start_writeback(folio);
 	folio_unlock(folio);
+	trace_swap_write(folio, SWAP_WRITE_SUBMITTED, 0);
 
 	submit_bio_wait(&bio);
 	__end_swap_bio_write(&bio);
@@ -460,6 +491,7 @@ static void swap_writepage_bdev_async(struct folio *folio,
 	count_swpout_vm_event(folio);
 	folio_start_writeback(folio);
 	folio_unlock(folio);
+	trace_swap_write(folio, SWAP_WRITE_SUBMITTED, 0);
 	submit_bio(bio);
 }
 
@@ -468,6 +500,7 @@ void __swap_writepage(struct folio *folio, struct swap_iocb **swap_plug)
 	struct swap_info_struct *sis = __swap_entry_to_info(folio->swap);
 
 	VM_BUG_ON_FOLIO(!folio_test_swapcache(folio), folio);
+	trace_swap_write(folio, SWAP_WRITE_QUEUED, 0);
 	/*
 	 * ->flags can be updated non-atomically,
 	 * but that will never affect SWP_FS_OPS, so the data_race
@@ -493,6 +526,9 @@ void swap_write_unplug(struct swap_iocb *sio)
 	int ret;
 
 	iov_iter_bvec(&from, ITER_SOURCE, sio->bvecs, sio->nr_bvecs, sio->len);
+	for (int p = 0; p < sio->nr_bvecs; p++)
+		trace_swap_write(bvec_folio(&sio->bvecs[p]),
+				 SWAP_WRITE_SUBMITTED, 0);
 	ret = mapping->a_ops->swap_rw(&sio->iocb, &from);
 	if (ret != -EIOCBQUEUED)
 		sio_write_complete(&sio->iocb, ret);

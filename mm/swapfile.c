@@ -1814,13 +1814,16 @@ again:
 		swap_cache_del_folio(folio);
 
 	if (unlikely(!folio_test_swapcache(folio))) {
-		trace_mm_vmscan_swap_alloc(-1, order,
-					   current_is_proactive_reclaim());
+		trace_mm_vmscan_swap_alloc(-1, 0, order,
+					   current_is_proactive_reclaim(), false);
 		return -ENOMEM;
 	}
 
-	trace_mm_vmscan_swap_alloc(swp_type(folio->swap), order,
-				   current_is_proactive_reclaim());
+	trace_mm_vmscan_swap_alloc(swp_type(folio->swap),
+				   swp_offset(folio->swap), order,
+				   current_is_proactive_reclaim(),
+				   __swap_entry_to_info(folio->swap)->flags &
+				   SWP_OFFLOAD_ONLY);
 
 	return 0;
 }
