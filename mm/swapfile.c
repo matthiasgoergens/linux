@@ -1398,13 +1398,13 @@ static bool swap_alloc_fast(struct folio *folio)
 	offset = this_cpu_read(percpu_swap_cluster.offset[order]);
 	if (!si || !offset || !get_swap_device_info(si))
 		return false;
-	if (this_cpu_read(percpu_swap_cluster.proactive[order]) !=
-	    current_is_proactive_reclaim()) {
+	if (!swap_device_eligible(si)) {
+		trace_mm_vmscan_swap_device_skip(si->type, si->prio, true);
 		put_swap_device(si);
 		return false;
 	}
-	if (!swap_device_eligible(si)) {
-		trace_mm_vmscan_swap_device_skip(si->type, si->prio, true);
+	if (this_cpu_read(percpu_swap_cluster.proactive[order]) !=
+	    current_is_proactive_reclaim()) {
 		put_swap_device(si);
 		return false;
 	}
@@ -2201,7 +2201,7 @@ swp_entry_t swap_alloc_hibernation_slot(int type)
 	struct swap_cluster_info *ci;
 	swp_entry_t entry = {0};
 
-	if (!si)
+	if (!si || (si->flags & SWP_OFFLOAD_ONLY))
 		goto fail;
 
 	/*

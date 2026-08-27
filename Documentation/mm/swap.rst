@@ -19,6 +19,7 @@ watermark or PSI policy considers memory pressure low.
 
 DAMON reclaim and ``MADV_PAGEOUT`` do not currently establish the proactive
 reclaim context, so they cannot allocate slots from an offload-only area.
+Offload-only areas are also ineligible for hibernation image allocation.
 
 The flag controls allocation of new swap slots.  It does not prevent reads,
 swapoff, or writes for slots which were allocated before the current reclaim
