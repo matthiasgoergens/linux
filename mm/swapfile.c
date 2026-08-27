@@ -1819,11 +1819,15 @@ again:
 		return -ENOMEM;
 	}
 
-	trace_mm_vmscan_swap_alloc(swp_type(folio->swap),
-				   swp_offset(folio->swap), order,
-				   current_is_proactive_reclaim(),
-				   __swap_entry_to_info(folio->swap)->flags &
-				   SWP_OFFLOAD_ONLY);
+	if (trace_mm_vmscan_swap_alloc_enabled()) {
+		struct swap_info_struct *si;
+
+		si = __swap_entry_to_info(folio->swap);
+		trace_mm_vmscan_swap_alloc(swp_type(folio->swap),
+					   swp_offset(folio->swap), order,
+					   current_is_proactive_reclaim(),
+					   si->flags & SWP_OFFLOAD_ONLY);
+	}
 
 	return 0;
 }

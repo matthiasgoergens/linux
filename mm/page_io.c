@@ -38,7 +38,12 @@ enum swap_write_stage {
 static __always_inline void trace_swap_write(struct folio *folio,
 					     unsigned int stage, int error)
 {
-	struct swap_info_struct *sis = __swap_entry_to_info(folio->swap);
+	struct swap_info_struct *sis;
+
+	if (!trace_mm_vmscan_swap_write_enabled())
+		return;
+
+	sis = __swap_entry_to_info(folio->swap);
 
 	trace_mm_vmscan_swap_write(sis->type, swp_offset(folio->swap),
 				    folio_nr_pages(folio),
