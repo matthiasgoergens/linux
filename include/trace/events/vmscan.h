@@ -660,7 +660,7 @@ TRACE_EVENT(mm_vmscan_kswapd_clear_hopeless,
 		__print_symbolic(__entry->reason, kswapd_clear_hopeless_reason_ops))
 );
 
-TRACE_EVENT(mm_vmscan_swap_device_skip,
+TRACE_EVENT(mm_vmscan_swap_area_skip,
 
 	TP_PROTO(int type, int priority, bool fast_path),
 

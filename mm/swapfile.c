@@ -1363,7 +1363,7 @@ static bool get_swap_device_info(struct swap_info_struct *si)
 	return true;
 }
 
-static bool swap_device_eligible(struct swap_info_struct *si)
+static bool swap_area_eligible(struct swap_info_struct *si)
 {
 	if (!(si->flags & SWP_OFFLOAD_ONLY))
 		return true;
@@ -1398,8 +1398,8 @@ static bool swap_alloc_fast(struct folio *folio)
 	offset = this_cpu_read(percpu_swap_cluster.offset[order]);
 	if (!si || !offset || !get_swap_device_info(si))
 		return false;
-	if (!swap_device_eligible(si)) {
-		trace_mm_vmscan_swap_device_skip(si->type, si->prio, true);
+	if (!swap_area_eligible(si)) {
+		trace_mm_vmscan_swap_area_skip(si->type, si->prio, true);
 		put_swap_device(si);
 		return false;
 	}
@@ -1430,8 +1430,8 @@ static void swap_alloc_slow(struct folio *folio)
 	spin_lock(&swap_avail_lock);
 start_over:
 	plist_for_each_entry_safe(si, next, &swap_avail_head, avail_list) {
-		if (!swap_device_eligible(si)) {
-			trace_mm_vmscan_swap_device_skip(si->type, si->prio, false);
+		if (!swap_area_eligible(si)) {
+			trace_mm_vmscan_swap_area_skip(si->type, si->prio, false);
 			continue;
 		}
 
