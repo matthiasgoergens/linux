@@ -25,3 +25,8 @@ writes must still be able to complete, and reads must remain reclaim-safe.
 An offload-only area should therefore be configured with a reclaim-safe swap
 area as fallback.  If no eligible swap space remains, swap allocation fails
 and the existing reclaim and OOM policy applies.
+
+The ``mm_vmscan_swap_device_skip`` tracepoint records an offload-only area
+rejected by either allocator path.  ``mm_vmscan_swap_alloc`` records the
+selected swap type, allocation order, and reclaim mode; a type of ``-1`` means
+that no eligible slot was allocated.

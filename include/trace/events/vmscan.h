@@ -659,6 +659,50 @@ TRACE_EVENT(mm_vmscan_kswapd_clear_hopeless,
 		__entry->nid,
 		__print_symbolic(__entry->reason, kswapd_clear_hopeless_reason_ops))
 );
+
+TRACE_EVENT(mm_vmscan_swap_device_skip,
+
+	TP_PROTO(int type, int priority, bool fast_path),
+
+	TP_ARGS(type, priority, fast_path),
+
+	TP_STRUCT__entry(
+		__field(int, type)
+		__field(int, priority)
+		__field(bool, fast_path)
+	),
+
+	TP_fast_assign(
+		__entry->type = type;
+		__entry->priority = priority;
+		__entry->fast_path = fast_path;
+	),
+
+	TP_printk("type=%d priority=%d fast_path=%d",
+		__entry->type, __entry->priority, __entry->fast_path)
+);
+
+TRACE_EVENT(mm_vmscan_swap_alloc,
+
+	TP_PROTO(int type, unsigned int order, bool proactive),
+
+	TP_ARGS(type, order, proactive),
+
+	TP_STRUCT__entry(
+		__field(int, type)
+		__field(unsigned int, order)
+		__field(bool, proactive)
+	),
+
+	TP_fast_assign(
+		__entry->type = type;
+		__entry->order = order;
+		__entry->proactive = proactive;
+	),
+
+	TP_printk("type=%d order=%u proactive=%d",
+		__entry->type, __entry->order, __entry->proactive)
+);
 #endif /* _TRACE_VMSCAN_H */
 
 /* This part must be outside protection */

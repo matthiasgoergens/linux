@@ -42,6 +42,7 @@
 #include <linux/suspend.h>
 #include <linux/zswap.h>
 #include <linux/plist.h>
+#include <trace/events/vmscan.h>
 
 #include <asm/tlbflush.h>
 #include <linux/leafops.h>
@@ -1382,6 +1383,7 @@ static bool swap_alloc_fast(struct folio *folio)
 	if (!si || !offset || !get_swap_device_info(si))
 		return false;
 	if (!swap_device_eligible(si)) {
+		trace_mm_vmscan_swap_device_skip(si->type, si->prio, true);
 		put_swap_device(si);
 		return false;
 	}
@@ -1407,8 +1409,10 @@ static void swap_alloc_slow(struct folio *folio)
 	spin_lock(&swap_avail_lock);
 start_over:
 	plist_for_each_entry_safe(si, next, &swap_avail_head, avail_list) {
-		if (!swap_device_eligible(si))
+		if (!swap_device_eligible(si)) {
+			trace_mm_vmscan_swap_device_skip(si->type, si->prio, false);
 			continue;
+		}
 
 		/* Rotate the device and switch to a new cluster */
 		plist_requeue(&si->avail_list, &swap_avail_head);
@@ -1787,8 +1791,14 @@ again:
 	if (unlikely(mem_cgroup_try_charge_swap(folio)))
 		swap_cache_del_folio(folio);
 
-	if (unlikely(!folio_test_swapcache(folio)))
+	if (unlikely(!folio_test_swapcache(folio))) {
+		trace_mm_vmscan_swap_alloc(-1, order,
+					   current_is_proactive_reclaim());
 		return -ENOMEM;
+	}
+
+	trace_mm_vmscan_swap_alloc(swp_type(folio->swap), order,
+				   current_is_proactive_reclaim());
 
 	return 0;
 }
