@@ -13,6 +13,10 @@ The swap allocator excludes such an area from kswapd, direct reclaim, and
 other pressure-driven swap allocation.  Normal swap priority ordering still
 applies among the areas eligible for the current reclaim context.
 
+This is a reclaim-provenance policy, not a measurement of current memory
+headroom.  Userspace should only request proactive offload while its own
+watermark or PSI policy considers memory pressure low.
+
 DAMON reclaim and ``MADV_PAGEOUT`` do not currently establish the proactive
 reclaim context, so they cannot allocate slots from an offload-only area.
 

@@ -441,6 +441,8 @@ static inline long get_nr_swap_pages(void)
 	return atomic_long_read(&nr_swap_pages);
 }
 
+long get_nr_swap_pages_eligible(void);
+
 extern void si_swapinfo(struct sysinfo *);
 extern int pin_hibernation_swap_type(dev_t device, sector_t offset);
 extern void unpin_hibernation_swap_type(int type);
@@ -494,6 +496,7 @@ static inline void put_swap_device(struct swap_info_struct *si)
 }
 
 #define get_nr_swap_pages()			0L
+#define get_nr_swap_pages_eligible()		0L
 #define total_swap_pages			0L
 #define total_swapcache_pages()			0UL
 #define vm_swap_full()				0

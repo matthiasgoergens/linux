@@ -67,6 +67,7 @@ static void move_cluster(struct swap_info_struct *si,
 static DEFINE_SPINLOCK(swap_lock);
 static unsigned int nr_swapfiles;
 atomic_long_t nr_swap_pages;
+static atomic_long_t nr_swap_pages_offload_only;
 /*
  * Some modules use swappable objects and may try to swap them out under
  * memory pressure (via the shrinker). Before doing so, they may wish to
@@ -121,6 +122,7 @@ atomic_t nr_rotate_swap = ATOMIC_INIT(0);
 struct percpu_swap_cluster {
 	struct swap_info_struct *si[SWAP_NR_ORDERS];
 	unsigned long offset[SWAP_NR_ORDERS];
+	bool proactive[SWAP_NR_ORDERS];
 	local_lock_t lock;
 };
 
@@ -1007,6 +1009,8 @@ out:
 	if (si->flags & SWP_SOLIDSTATE) {
 		this_cpu_write(percpu_swap_cluster.offset[order], next);
 		this_cpu_write(percpu_swap_cluster.si[order], si);
+		this_cpu_write(percpu_swap_cluster.proactive[order],
+			       current_is_proactive_reclaim());
 	} else {
 		si->global_cluster->next[order] = next;
 	}
@@ -1305,6 +1309,8 @@ static void swap_range_alloc(struct swap_info_struct *si,
 		if (vm_swap_full())
 			schedule_work(&si->reclaim_work);
 	}
+	if (si->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_sub(nr_entries, &nr_swap_pages_offload_only);
 	atomic_long_sub(nr_entries, &nr_swap_pages);
 }
 
@@ -1335,6 +1341,8 @@ static void swap_range_free(struct swap_info_struct *si, unsigned long offset,
 	 * only after the above cleanups are done.
 	 */
 	smp_wmb();
+	if (si->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_add(nr_entries, &nr_swap_pages_offload_only);
 	atomic_long_add(nr_entries, &nr_swap_pages);
 	swap_usage_sub(si, nr_entries);
 }
@@ -1363,6 +1371,16 @@ static bool swap_device_eligible(struct swap_info_struct *si)
 	return current_is_proactive_reclaim();
 }
 
+long get_nr_swap_pages_eligible(void)
+{
+	long nr_pages = get_nr_swap_pages();
+
+	if (!current_is_proactive_reclaim())
+		nr_pages -= atomic_long_read(&nr_swap_pages_offload_only);
+
+	return max(nr_pages, 0L);
+}
+
 /*
  * Fast path try to get swap entries with specified order from current
  * CPU's swap entry pool (a cluster).
@@ -1382,6 +1400,11 @@ static bool swap_alloc_fast(struct folio *folio)
 	offset = this_cpu_read(percpu_swap_cluster.offset[order]);
 	if (!si || !offset || !get_swap_device_info(si))
 		return false;
+	if (this_cpu_read(percpu_swap_cluster.proactive[order]) !=
+	    current_is_proactive_reclaim()) {
+		put_swap_device(si);
+		return false;
+	}
 	if (!swap_device_eligible(si)) {
 		trace_mm_vmscan_swap_device_skip(si->type, si->prio, true);
 		put_swap_device(si);
@@ -2990,6 +3013,8 @@ static int setup_swap_extents(struct swap_info_struct *sis,
 
 static void _enable_swap_info(struct swap_info_struct *si)
 {
+	if (si->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_add(si->pages, &nr_swap_pages_offload_only);
 	atomic_long_add(si->pages, &nr_swap_pages);
 	total_swap_pages += si->pages;
 
@@ -3138,6 +3163,8 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	spin_lock(&p->lock);
 	del_from_avail_list(p, true);
 	plist_del(&p->list, &swap_active_head);
+	if (p->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_sub(p->pages, &nr_swap_pages_offload_only);
 	atomic_long_sub(p->pages, &nr_swap_pages);
 	total_swap_pages -= p->pages;
 	spin_unlock(&p->lock);
