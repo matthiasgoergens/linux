@@ -67,7 +67,7 @@ static void move_cluster(struct swap_info_struct *si,
 static DEFINE_SPINLOCK(swap_lock);
 static unsigned int nr_swapfiles;
 atomic_long_t nr_swap_pages;
-static atomic_long_t nr_swap_pages_offload_only;
+static atomic_long_t nr_swap_pages_reclaim_safe;
 /*
  * Some modules use swappable objects and may try to swap them out under
  * memory pressure (via the shrinker). Before doing so, they may wish to
@@ -1309,8 +1309,8 @@ static void swap_range_alloc(struct swap_info_struct *si,
 		if (vm_swap_full())
 			schedule_work(&si->reclaim_work);
 	}
-	if (si->flags & SWP_OFFLOAD_ONLY)
-		atomic_long_sub(nr_entries, &nr_swap_pages_offload_only);
+	if (!(si->flags & SWP_OFFLOAD_ONLY))
+		atomic_long_sub(nr_entries, &nr_swap_pages_reclaim_safe);
 	atomic_long_sub(nr_entries, &nr_swap_pages);
 }
 
@@ -1341,8 +1341,8 @@ static void swap_range_free(struct swap_info_struct *si, unsigned long offset,
 	 * only after the above cleanups are done.
 	 */
 	smp_wmb();
-	if (si->flags & SWP_OFFLOAD_ONLY)
-		atomic_long_add(nr_entries, &nr_swap_pages_offload_only);
+	if (!(si->flags & SWP_OFFLOAD_ONLY))
+		atomic_long_add(nr_entries, &nr_swap_pages_reclaim_safe);
 	atomic_long_add(nr_entries, &nr_swap_pages);
 	swap_usage_sub(si, nr_entries);
 }
@@ -1373,12 +1373,10 @@ static bool swap_device_eligible(struct swap_info_struct *si)
 
 long get_nr_swap_pages_eligible(void)
 {
-	long nr_pages = get_nr_swap_pages();
+	if (current_is_proactive_reclaim())
+		return get_nr_swap_pages();
 
-	if (!current_is_proactive_reclaim())
-		nr_pages -= atomic_long_read(&nr_swap_pages_offload_only);
-
-	return max(nr_pages, 0L);
+	return atomic_long_read(&nr_swap_pages_reclaim_safe);
 }
 
 /*
@@ -3013,8 +3011,8 @@ static int setup_swap_extents(struct swap_info_struct *sis,
 
 static void _enable_swap_info(struct swap_info_struct *si)
 {
-	if (si->flags & SWP_OFFLOAD_ONLY)
-		atomic_long_add(si->pages, &nr_swap_pages_offload_only);
+	if (!(si->flags & SWP_OFFLOAD_ONLY))
+		atomic_long_add(si->pages, &nr_swap_pages_reclaim_safe);
 	atomic_long_add(si->pages, &nr_swap_pages);
 	total_swap_pages += si->pages;
 
@@ -3163,8 +3161,8 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	spin_lock(&p->lock);
 	del_from_avail_list(p, true);
 	plist_del(&p->list, &swap_active_head);
-	if (p->flags & SWP_OFFLOAD_ONLY)
-		atomic_long_sub(p->pages, &nr_swap_pages_offload_only);
+	if (!(p->flags & SWP_OFFLOAD_ONLY))
+		atomic_long_sub(p->pages, &nr_swap_pages_reclaim_safe);
 	atomic_long_sub(p->pages, &nr_swap_pages);
 	total_swap_pages -= p->pages;
 	spin_unlock(&p->lock);
