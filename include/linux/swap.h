@@ -522,6 +522,7 @@ static inline void mem_cgroup_uncharge_swap(unsigned short id, unsigned int nr_p
 }
 
 extern long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg);
+extern long mem_cgroup_get_nr_swap_pages_eligible(struct mem_cgroup *memcg);
 extern bool mem_cgroup_swap_full(struct folio *folio);
 #else
 static inline int mem_cgroup_try_charge_swap(struct folio *folio)
@@ -535,6 +536,11 @@ static inline void mem_cgroup_uncharge_swap(unsigned short id,
 }
 
 static inline long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg)
+{
+	return get_nr_swap_pages();
+}
+
+static inline long mem_cgroup_get_nr_swap_pages_eligible(struct mem_cgroup *memcg)
 {
 	return get_nr_swap_pages_eligible();
 }

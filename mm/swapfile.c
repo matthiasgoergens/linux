@@ -3689,17 +3689,6 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 
 	if (swap_flags & ~SWAP_FLAGS_VALID)
 		return -EINVAL;
-	/*
-	 * Cluster discard can run later from discard_work, after the context
-	 * which freed the entries has ended.  Swapon-time discard is explicit
-	 * and synchronous, but page discard cannot honour offload provenance.
-	 */
-	if ((swap_flags & SWAP_FLAG_OFFLOAD_ONLY) &&
-	    (swap_flags & SWAP_FLAG_DISCARD) &&
-	    (!(swap_flags & SWAP_FLAG_DISCARD_ONCE) ||
-	     (swap_flags & SWAP_FLAG_DISCARD_PAGES)))
-		return -EINVAL;
-
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
@@ -3834,6 +3823,18 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 			si->flags &= ~SWP_PAGE_DISCARD;
 		else if (swap_flags & SWAP_FLAG_DISCARD_PAGES)
 			si->flags &= ~SWP_AREA_DISCARD;
+
+		/*
+		 * Cluster discard can run later from discard_work, after the
+		 * context which freed the entries has ended.  Swapon-time discard
+		 * is explicit and synchronous, but page discard cannot honour
+		 * offload provenance.
+		 */
+		if ((si->flags & SWP_OFFLOAD_ONLY) &&
+		    (si->flags & SWP_PAGE_DISCARD)) {
+			error = -EINVAL;
+			goto bad_swap_unlock_inode;
+		}
 
 		/* issue a swapon-time discard if it's still required */
 		if (si->flags & SWP_AREA_DISCARD) {
