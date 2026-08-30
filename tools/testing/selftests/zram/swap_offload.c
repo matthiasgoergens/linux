@@ -51,6 +51,23 @@ static int reject_page_discard(const char *path, int priority)
 	return 1;
 }
 
+static int accept_discard_once_pages(const char *path, int priority)
+{
+	int flags = SWAP_FLAG_PREFER | SWAP_FLAG_OFFLOAD_ONLY |
+		SWAP_FLAG_DISCARD | SWAP_FLAG_DISCARD_ONCE |
+		SWAP_FLAG_DISCARD_PAGES | priority;
+
+	if (syscall(SYS_swapon, path, flags)) {
+		perror("swapon discard-once+discard-pages");
+		return 1;
+	}
+	if (syscall(SYS_swapoff, path)) {
+		perror("swapoff discard-once+discard-pages");
+		return 1;
+	}
+	return 0;
+}
+
 static int join_cgroup(const char *procs)
 {
 	char pid[32];
@@ -191,13 +208,15 @@ int main(int argc, char **argv)
 				SWAP_FLAG_DISCARD | SWAP_FLAG_DISCARD_ONCE);
 	if (argc == 4 && !strcmp(argv[1], "reject-page-discard"))
 		return reject_page_discard(argv[2], atoi(argv[3]));
+	if (argc == 4 && !strcmp(argv[1], "accept-discard-once-pages"))
+		return accept_discard_once_pages(argv[2], atoi(argv[3]));
 	if (argc == 3 && !strcmp(argv[1], "pin"))
 		return pin_to_one_cpu(argv[2]);
 	if (argc == 6 && !strcmp(argv[1], "allocate"))
 		return allocate(argv[2], argv[3], argv[4], argv[5]);
 
 	fprintf(stderr,
-		"usage: %s activate DEVICE PRIORITY | reject-page-discard DEVICE PRIORITY | pin PID | allocate BYTES CGROUP.PROCS READY VERIFIED\n",
+		"usage: %s activate DEVICE PRIORITY | reject-page-discard DEVICE PRIORITY | accept-discard-once-pages DEVICE PRIORITY | pin PID | allocate BYTES CGROUP.PROCS READY VERIFIED\n",
 		argv[0]);
 	return 1;
 }

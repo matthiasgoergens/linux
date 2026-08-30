@@ -97,6 +97,8 @@ swapon -p "$safe_prio" "$safe"
 dev_makeswap=$dev_start
 ./swap_offload reject-page-discard "$offload" "$offload_prio" ||
 	fail "offload-only page discard was accepted"
+./swap_offload accept-discard-once-pages "$offload" "$offload_prio" ||
+	fail "resolved offload-only discard-once was rejected"
 ./swap_offload activate "$offload" "$offload_prio"
 dev_makeswap=$dev_end
 
