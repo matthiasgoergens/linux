@@ -6,6 +6,8 @@
 #include <linux/folio_batch.h>
 #include <linux/shmem_fs.h>
 #include <linux/swap.h>
+
+#include <kunit/static_stub.h>
 #include <linux/uio.h>
 
 #include <drm/drm_cache.h>
@@ -18,6 +20,10 @@
 #include "i915_gem_tiling.h"
 #include "i915_scatterlist.h"
 #include "i915_trace.h"
+
+int i915_shmem_write_folio(struct folio *folio);
+int i915_shmem_writeback_folio(struct writeback_control *wbc,
+				struct folio *folio);
 #include "i915_utils.h"
 
 /*
@@ -304,6 +310,32 @@ shmem_truncate(struct drm_i915_gem_object *obj)
 	return 0;
 }
 
+int i915_shmem_write_folio(struct folio *folio)
+{
+	KUNIT_STATIC_STUB_REDIRECT(i915_shmem_write_folio, folio);
+
+	return shmem_write_folio(folio);
+}
+
+int i915_shmem_writeback_folio(struct writeback_control *wbc,
+				struct folio *folio)
+{
+	int error;
+
+	if (folio_mapped(folio)) {
+		folio_redirty_for_writepage(wbc, folio);
+		return 0;
+	}
+
+	error = i915_shmem_write_folio(folio);
+	if (error == AOP_WRITEPAGE_ACTIVATE) {
+		folio_unlock(folio);
+		error = 0;
+	}
+
+	return error;
+}
+
 void __shmem_writeback(size_t size, struct address_space *mapping)
 {
 	struct writeback_control wbc = {
@@ -321,17 +353,8 @@ void __shmem_writeback(size_t size, struct address_space *mapping)
 	 * instead of invoking writeback so they are aged and paged out
 	 * as normal.
 	 */
-	while ((folio = writeback_iter(mapping, &wbc, folio, &error))) {
-		if (folio_mapped(folio)) {
-			folio_redirty_for_writepage(&wbc, folio);
-		} else {
-			error = shmem_write_folio(folio);
-			if (error == AOP_WRITEPAGE_ACTIVATE) {
-				folio_unlock(folio);
-				error = 0;
-			}
-		}
-	}
+	while ((folio = writeback_iter(mapping, &wbc, folio, &error)))
+		error = i915_shmem_writeback_folio(&wbc, folio);
 }
 
 static void
