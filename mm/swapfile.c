@@ -65,13 +65,17 @@ static void move_cluster(struct swap_info_struct *si,
  */
 static DEFINE_SPINLOCK(swap_lock);
 static unsigned int nr_swapfiles;
-atomic_long_t nr_swap_pages;
 /*
  * Some modules use swappable objects and may try to swap them out under
  * memory pressure (via the shrinker). Before doing so, they may wish to
  * check to see if any swap space is available.
+ *
+ * This remains the raw free-space counter for accounting users. Reclaim
+ * decisions subtract nr_swap_pages_offload_only below when necessary.
  */
+atomic_long_t nr_swap_pages;
 EXPORT_SYMBOL_GPL(nr_swap_pages);
+static atomic_long_t nr_swap_pages_offload_only;
 /* protected with swap_lock. reading in vm_swap_full() doesn't need lock */
 long total_swap_pages;
 #define DEF_SWAP_PRIO  -1
@@ -120,6 +124,7 @@ atomic_t nr_rotate_swap = ATOMIC_INIT(0);
 struct percpu_swap_cluster {
 	struct swap_info_struct *si[SWAP_NR_ORDERS];
 	unsigned long offset[SWAP_NR_ORDERS];
+	bool allow_offload_swap[SWAP_NR_ORDERS];
 	local_lock_t lock;
 };
 
@@ -1006,6 +1011,8 @@ out:
 	if (si->flags & SWP_SOLIDSTATE) {
 		this_cpu_write(percpu_swap_cluster.offset[order], next);
 		this_cpu_write(percpu_swap_cluster.si[order], si);
+		this_cpu_write(percpu_swap_cluster.allow_offload_swap[order],
+			       current_reclaim_allows_offload_swap());
 	} else {
 		si->global_cluster->next[order] = next;
 	}
@@ -1310,6 +1317,8 @@ static void swap_range_alloc(struct swap_info_struct *si,
 		if (vm_swap_full())
 			schedule_work(&si->reclaim_work);
 	}
+	if (si->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_sub(nr_entries, &nr_swap_pages_offload_only);
 	atomic_long_sub(nr_entries, &nr_swap_pages);
 }
 
@@ -1340,6 +1349,8 @@ static void swap_range_free(struct swap_info_struct *si, unsigned long offset,
 	 * only after the above cleanups are done.
 	 */
 	smp_wmb();
+	if (si->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_add(nr_entries, &nr_swap_pages_offload_only);
 	atomic_long_add(nr_entries, &nr_swap_pages);
 	swap_usage_sub(si, nr_entries);
 }
@@ -1360,6 +1371,31 @@ static bool get_swap_device_info(struct swap_info_struct *si)
 	return true;
 }
 
+static bool swap_area_eligible(struct swap_info_struct *si)
+{
+	if (!(READ_ONCE(si->flags) & SWP_OFFLOAD_ONLY))
+		return true;
+
+	return current_reclaim_allows_offload_swap();
+}
+
+long get_nr_swap_pages_eligible(void)
+{
+	long nr_pages;
+
+	if (current_reclaim_allows_offload_swap())
+		return get_nr_swap_pages();
+
+	/*
+	 * The reads are intentionally unpaired.  This is a capacity hint; the
+	 * allocator enforces eligibility.  Clamp a transient negative result.
+	 */
+	nr_pages = get_nr_swap_pages() -
+		   atomic_long_read(&nr_swap_pages_offload_only);
+	return max(nr_pages, 0L);
+}
+EXPORT_SYMBOL_GPL(get_nr_swap_pages_eligible);
+
 /*
  * Fast path try to get swap entries with specified order from current
  * CPU's swap entry pool (a cluster).
@@ -1379,6 +1415,20 @@ static bool swap_alloc_fast(struct folio *folio)
 	offset = this_cpu_read(percpu_swap_cluster.offset[order]);
 	if (!si || !offset || !get_swap_device_info(si))
 		return false;
+	if (!swap_area_eligible(si)) {
+		put_swap_device(si);
+		return false;
+	}
+	/*
+	 * Pressure reclaim may cache a lower-priority conventional area while
+	 * an offload-only area is ineligible.  Drop that cache on a context
+	 * change so proactive reclaim returns to the normal priority search.
+	 */
+	if (this_cpu_read(percpu_swap_cluster.allow_offload_swap[order]) !=
+	    current_reclaim_allows_offload_swap()) {
+		put_swap_device(si);
+		return false;
+	}
 
 	ci = swap_cluster_lock(si, offset);
 	if (cluster_is_usable(ci, order)) {
@@ -1401,6 +1451,9 @@ static void swap_alloc_slow(struct folio *folio)
 	spin_lock(&swap_avail_lock);
 start_over:
 	plist_for_each_entry_safe(si, next, &swap_avail_head, avail_list) {
+		if (!swap_area_eligible(si))
+			continue;
+
 		/* Rotate the device and switch to a new cluster */
 		plist_requeue(&si->avail_list, &swap_avail_head);
 		spin_unlock(&swap_avail_lock);
@@ -1444,7 +1497,8 @@ start_over:
 	plist_for_each_entry_safe(si, next, &swap_active_head, list) {
 		spin_unlock(&swap_lock);
 		if (get_swap_device_info(si)) {
-			if (si->flags & SWP_PAGE_DISCARD)
+			if (swap_area_eligible(si) &&
+			    (si->flags & SWP_PAGE_DISCARD))
 				ret = swap_do_scheduled_discard(si);
 			put_swap_device(si);
 		}
@@ -2161,7 +2215,7 @@ swp_entry_t swap_alloc_hibernation_slot(int type)
 	struct swap_cluster_info *ci;
 	swp_entry_t entry = {0};
 
-	if (!si)
+	if (!si || (si->flags & SWP_OFFLOAD_ONLY))
 		goto fail;
 
 	/*
@@ -2228,7 +2282,8 @@ static int __find_hibernation_swap_type(dev_t device, sector_t offset)
 	for (type = 0; type < nr_swapfiles; type++) {
 		struct swap_info_struct *sis = swap_info[type];
 
-		if (!(sis->flags & SWP_WRITEOK))
+		if (!(sis->flags & SWP_WRITEOK) ||
+		    (sis->flags & SWP_OFFLOAD_ONLY))
 			continue;
 
 		if (device == sis->bdev->bd_dev) {
@@ -2354,7 +2409,8 @@ int find_first_swap(dev_t *device)
 	for (type = 0; type < nr_swapfiles; type++) {
 		struct swap_info_struct *sis = swap_info[type];
 
-		if (!(sis->flags & SWP_WRITEOK))
+		if (!(sis->flags & SWP_WRITEOK) ||
+		    (sis->flags & SWP_OFFLOAD_ONLY))
 			continue;
 		*device = sis->bdev->bd_dev;
 		spin_unlock(&swap_lock);
@@ -2394,7 +2450,8 @@ unsigned int count_swap_pages(int type, int free)
 		struct swap_info_struct *sis = swap_info[type];
 
 		spin_lock(&sis->lock);
-		if (sis->flags & SWP_WRITEOK) {
+		if ((sis->flags & SWP_WRITEOK) &&
+		    !(sis->flags & SWP_OFFLOAD_ONLY)) {
 			n = sis->pages;
 			if (free)
 				n -= swap_usage_in_pages(sis);
@@ -2984,6 +3041,8 @@ static int setup_swap_extents(struct swap_info_struct *sis,
 
 static void _enable_swap_info(struct swap_info_struct *si)
 {
+	if (si->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_add(si->pages, &nr_swap_pages_offload_only);
 	atomic_long_add(si->pages, &nr_swap_pages);
 	total_swap_pages += si->pages;
 
@@ -3132,6 +3191,8 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	spin_lock(&p->lock);
 	del_from_avail_list(p, true);
 	plist_del(&p->list, &swap_active_head);
+	if (p->flags & SWP_OFFLOAD_ONLY)
+		atomic_long_sub(p->pages, &nr_swap_pages_offload_only);
 	atomic_long_sub(p->pages, &nr_swap_pages);
 	total_swap_pages -= p->pages;
 	spin_unlock(&p->lock);
@@ -3628,7 +3689,6 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 
 	if (swap_flags & ~SWAP_FLAGS_VALID)
 		return -EINVAL;
-
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
@@ -3739,6 +3799,9 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		inced_nr_rotate_swap = true;
 	}
 
+	if (swap_flags & SWAP_FLAG_OFFLOAD_ONLY)
+		si->flags |= SWP_OFFLOAD_ONLY;
+
 	if ((swap_flags & SWAP_FLAG_DISCARD) &&
 	    si->bdev && bdev_max_discard_sectors(si->bdev)) {
 		/*
@@ -3760,6 +3823,18 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 			si->flags &= ~SWP_PAGE_DISCARD;
 		else if (swap_flags & SWAP_FLAG_DISCARD_PAGES)
 			si->flags &= ~SWP_AREA_DISCARD;
+
+		/*
+		 * Cluster discard can run later from discard_work, after the
+		 * context which freed the entries has ended.  Swapon-time discard
+		 * is explicit and synchronous, but page discard cannot honour
+		 * offload provenance.
+		 */
+		if ((si->flags & SWP_OFFLOAD_ONLY) &&
+		    (si->flags & SWP_PAGE_DISCARD)) {
+			error = -EINVAL;
+			goto bad_swap_unlock_inode;
+		}
 
 		/* issue a swapon-time discard if it's still required */
 		if (si->flags & SWP_AREA_DISCARD) {
