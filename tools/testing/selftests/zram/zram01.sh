@@ -66,10 +66,11 @@ zram_makefs
 zram_mount
 
 zram_fill_fs
-zram_cleanup
+zram_cleanup || ERR_CODE=1
 
 if [ $ERR_CODE -ne 0 ]; then
 	echo "$TCID : [FAIL]"
+	exit 1
 else
 	echo "$TCID : [PASS]"
 fi

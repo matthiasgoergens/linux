@@ -35,10 +35,11 @@ zram_set_disksizes
 zram_set_memlimit
 zram_makeswap
 zram_swapoff
-zram_cleanup
+zram_cleanup || ERR_CODE=1
 
 if [ $ERR_CODE -ne 0 ]; then
 	echo "$TCID : [FAIL]"
+	exit 1
 else
 	echo "$TCID : [PASS]"
 fi

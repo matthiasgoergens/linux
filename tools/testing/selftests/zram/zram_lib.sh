@@ -44,32 +44,48 @@ kernel_gte()
 	return 1
 }
 
+zram_wait_for_udev()
+{
+	# Probing triggered by device changes can still hold the device open.
+	# The queue is global; only the subsequent teardown can establish failure.
+	if command -v udevadm >/dev/null 2>&1; then
+		udevadm settle --timeout=5 ||
+			echo "udev queue did not settle; attempting cleanup" >&2
+	fi
+	return 0
+}
+
 zram_cleanup()
 {
 	echo "zram cleanup"
 	local i=
+	local ret=0
 	for i in $(seq $dev_start $dev_makeswap); do
-		swapoff /dev/zram$i
+		swapoff /dev/zram$i || ret=1
 	done
 
 	for i in $(seq $dev_start $dev_mounted); do
-		umount /dev/zram$i
+		umount /dev/zram$i || ret=1
 	done
 
+	zram_wait_for_udev
 	for i in $(seq $dev_start $dev_end); do
-		echo 1 > /sys/block/zram${i}/reset
-		rm -rf zram$i
+		echo 1 > /sys/block/zram${i}/reset || ret=1
+		rm -rf zram$i || ret=1
 	done
+	# Reset emits another device-change event before removal.
+	zram_wait_for_udev
 
 	if [ $sys_control -eq 1 ]; then
 		for i in $(seq $dev_start $dev_end); do
-			echo $i > /sys/class/zram-control/hot_remove
+			echo $i > /sys/class/zram-control/hot_remove || ret=1
 		done
 	fi
 
 	if [ $module_load -eq 1 ]; then
-		rmmod zram > /dev/null 2>&1
+		rmmod zram || ret=1
 	fi
+	return "$ret"
 }
 
 zram_load()
