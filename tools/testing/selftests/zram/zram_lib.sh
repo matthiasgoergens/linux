@@ -5,10 +5,10 @@
 # Author: Alexey Kodanev <alexey.kodanev@oracle.com>
 # Modified: Naresh Kamboju <naresh.kamboju@linaro.org>
 
-dev_makeswap=-1
-dev_mounted=-1
-dev_start=0
-dev_end=-1
+# IDs returned by hot_add, in allocation order; old kernels use 0..dev_num-1.
+dev_ids=""
+dev_swap_ids=""
+dev_mount_ids=""
 module_load=-1
 sys_control=-1
 # Kselftest framework requirement - SKIP code is 4.
@@ -44,32 +44,72 @@ kernel_gte()
 	return 1
 }
 
+zram_wait_for_udev()
+{
+	# Probing triggered by device changes can still hold the device open.
+	# The queue is global; only the subsequent teardown can establish failure.
+	if command -v udevadm >/dev/null 2>&1; then
+		udevadm settle --timeout=5 ||
+			echo "udev queue did not settle; attempting cleanup" >&2
+	fi
+	return 0
+}
+
 zram_cleanup()
 {
 	echo "zram cleanup"
 	local i=
-	for i in $(seq $dev_start $dev_makeswap); do
-		swapoff /dev/zram$i
+	local ret=0
+	local busy_ids=""
+	for i in $dev_ids; do
+		case " $dev_swap_ids " in
+			*" $i "*) ;;
+			*)
+				# A signal can arrive after a helper activates swap but
+				# before its caller records the ID.
+				grep -q "^/dev/zram${i}[[:space:]]" /proc/swaps ||
+					continue
+				;;
+		esac
+		if ! swapoff /dev/zram$i; then
+			ret=1
+			busy_ids="$busy_ids $i"
+		fi
 	done
 
-	for i in $(seq $dev_start $dev_mounted); do
-		umount /dev/zram$i
+	for i in $dev_mount_ids; do
+		if ! umount /dev/zram$i; then
+			ret=1
+			busy_ids="$busy_ids $i"
+		fi
 	done
 
-	for i in $(seq $dev_start $dev_end); do
-		echo 1 > /sys/block/zram${i}/reset
-		rm -rf zram$i
+	zram_wait_for_udev
+	for i in $dev_ids; do
+		case " $busy_ids " in
+			*" $i "*) continue ;;
+		esac
+		echo 1 > /sys/block/zram${i}/reset || ret=1
+		case " $dev_mount_ids " in
+			*" $i "*) rmdir "zram$i" || ret=1 ;;
+		esac
 	done
+	# Reset emits another device-change event before removal.
+	zram_wait_for_udev
 
 	if [ $sys_control -eq 1 ]; then
-		for i in $(seq $dev_start $dev_end); do
-			echo $i > /sys/class/zram-control/hot_remove
+		for i in $dev_ids; do
+			case " $busy_ids " in
+				*" $i "*) continue ;;
+			esac
+			echo $i > /sys/class/zram-control/hot_remove || ret=1
 		done
 	fi
 
 	if [ $module_load -eq 1 ]; then
-		rmmod zram > /dev/null 2>&1
+		rmmod zram || ret=1
 	fi
+	return "$ret"
 }
 
 zram_load()
@@ -80,15 +120,23 @@ zram_load()
 	if [ -d "/sys/class/zram-control" ]; then
 		echo "zram modules already loaded, kernel supports" \
 			"zram-control interface"
-		dev_start=$(ls /dev/zram* | wc -w)
-		dev_end=$(($dev_start + $dev_num - 1))
 		sys_control=1
 
-		for i in $(seq $dev_start $dev_end); do
-			cat /sys/class/zram-control/hot_add > /dev/null
+		for i in $(seq 1 $dev_num); do
+			if ! id=$(cat /sys/class/zram-control/hot_add); then
+				echo "FAIL zram hot_add failed" >&2
+				return 1
+			fi
+			case "$id" in
+				''|*[!0-9]*)
+					echo "FAIL invalid zram hot_add ID: $id" >&2
+					return 1
+					;;
+			esac
+			dev_ids="$dev_ids $id"
 		done
 
-		echo "all zram devices (/dev/zram$dev_start~$dev_end" \
+		echo "all zram devices ($dev_ids)" \
 			"successfully created"
 		return 0
 	fi
@@ -112,8 +160,11 @@ zram_load()
 	fi
 
 	module_load=1
-	dev_end=$(($dev_num - 1))
-	echo "all zram devices (/dev/zram0~$dev_end) successfully created"
+	local last=$(($dev_num - 1))
+	for i in $(seq 0 $last); do
+		dev_ids="$dev_ids $i"
+	done
+	echo "all zram devices (/dev/zram0~$last) successfully created"
 }
 
 zram_max_streams()
@@ -127,8 +178,10 @@ zram_max_streams()
 		return 0
 	fi
 
-	local i=$dev_start
+	set -- $dev_ids
 	for max_s in $zram_max_streams; do
+		local i=$1
+		shift
 		local sys_path="/sys/block/zram${i}/max_comp_streams"
 		echo $max_s > $sys_path || \
 			echo "FAIL failed to set '$max_s' to $sys_path"
@@ -138,7 +191,6 @@ zram_max_streams()
 		[ "$max_s" -ne "$max_streams" ] && \
 			echo "FAIL can't set max_streams '$max_s', get $max_stream"
 
-		i=$(($i + 1))
 		echo "$sys_path = '$max_streams'"
 	done
 
@@ -149,15 +201,17 @@ zram_compress_alg()
 {
 	echo "test that we can set compression algorithm"
 
-	local i=$dev_start
+	set -- $dev_ids
+	local i=$1
 	local algs=$(cat /sys/block/zram${i}/comp_algorithm)
 	echo "supported algs: $algs"
 
 	for alg in $zram_algs; do
+		local i=$1
+		shift
 		local sys_path="/sys/block/zram${i}/comp_algorithm"
 		echo "$alg" >	$sys_path || \
 			echo "FAIL can't set '$alg' to $sys_path"
-		i=$(($i + 1))
 		echo "$sys_path = '$alg'"
 	done
 
@@ -167,13 +221,14 @@ zram_compress_alg()
 zram_set_disksizes()
 {
 	echo "set disk size to zram device(s)"
-	local i=$dev_start
+	set -- $dev_ids
 	for ds in $zram_sizes; do
+		local i=$1
+		shift
 		local sys_path="/sys/block/zram${i}/disksize"
 		echo "$ds" >	$sys_path || \
 			echo "FAIL can't set '$ds' to $sys_path"
 
-		i=$(($i + 1))
 		echo "$sys_path = '$ds'"
 	done
 
@@ -184,13 +239,14 @@ zram_set_memlimit()
 {
 	echo "set memory limit to zram device(s)"
 
-	local i=$dev_start
+	set -- $dev_ids
 	for ds in $zram_mem_limits; do
+		local i=$1
+		shift
 		local sys_path="/sys/block/zram${i}/mem_limit"
 		echo "$ds" >	$sys_path || \
 			echo "FAIL can't set '$ds' to $sys_path"
 
-		i=$(($i + 1))
 		echo "$sys_path = '$ds'"
 	done
 
@@ -200,22 +256,24 @@ zram_set_memlimit()
 zram_makeswap()
 {
 	echo "make swap with zram device(s)"
-	local i=$dev_start
-	for i in $(seq $dev_start $dev_end); do
+	local i
+	for i in $dev_ids; do
 		mkswap /dev/zram$i > err.log 2>&1
 		if [ $? -ne 0 ]; then
 			cat err.log
-			echo "FAIL mkswap /dev/zram$1 failed"
+			echo "FAIL mkswap /dev/zram$i failed"
+			continue
 		fi
 
 		swapon /dev/zram$i > err.log 2>&1
 		if [ $? -ne 0 ]; then
 			cat err.log
-			echo "FAIL swapon /dev/zram$1 failed"
+			echo "FAIL swapon /dev/zram$i failed"
+			continue
 		fi
 
 		echo "done with /dev/zram$i"
-		dev_makeswap=$i
+		dev_swap_ids="$dev_swap_ids $i"
 	done
 
 	echo "zram making zram mkswap and swapon: OK"
@@ -224,22 +282,26 @@ zram_makeswap()
 zram_swapoff()
 {
 	local i=
-	for i in $(seq $dev_start $dev_end); do
+	local failed_ids=""
+	for i in $dev_swap_ids; do
 		swapoff /dev/zram$i > err.log 2>&1
 		if [ $? -ne 0 ]; then
 			cat err.log
 			echo "FAIL swapoff /dev/zram$i failed"
+			failed_ids="$failed_ids $i"
 		fi
 	done
-	dev_makeswap=-1
+	dev_swap_ids=$failed_ids
 
 	echo "zram swapoff: OK"
 }
 
 zram_makefs()
 {
-	local i=$dev_start
+	set -- $dev_ids
 	for fs in $zram_filesystems; do
+		local i=$1
+		shift
 		# if requested fs not supported default it to ext2
 		which mkfs.$fs > /dev/null 2>&1 || fs=ext2
 
@@ -249,7 +311,6 @@ zram_makefs()
 			cat err.log
 			echo "FAIL failed to make $fs on /dev/zram$i"
 		fi
-		i=$(($i + 1))
 		echo "zram mkfs.$fs: OK"
 	done
 }
@@ -257,13 +318,18 @@ zram_makefs()
 zram_mount()
 {
 	local i=0
-	for i in $(seq $dev_start $dev_end); do
+	for i in $dev_ids; do
 		echo "mount /dev/zram$i"
-		mkdir zram$i
-		mount /dev/zram$i zram$i > /dev/null || \
+		mkdir "zram$i" || return 1
+		if mount /dev/zram$i "zram$i" > /dev/null; then
+			dev_mount_ids="$dev_mount_ids $i"
+		else
 			echo "FAIL mount /dev/zram$i failed"
-		dev_mounted=$i
+			rmdir "zram$i" || return 1
+			return 1
+		fi
 	done
 
 	echo "zram mount of zram device(s): OK"
+	return 0
 }

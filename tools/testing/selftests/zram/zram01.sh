@@ -33,7 +33,7 @@ zram_algs="lzo"
 
 zram_fill_fs()
 {
-	for i in $(seq $dev_start $dev_end); do
+	for i in $dev_ids; do
 		echo "fill zram$i..."
 		local b=0
 		while [ true ]; do
@@ -57,19 +57,20 @@ zram_fill_fs()
 }
 
 check_prereqs
-zram_load
+zram_load || { zram_cleanup; exit 1; }
 zram_max_streams
 zram_compress_alg
 zram_set_disksizes
 zram_set_memlimit
 zram_makefs
-zram_mount
+zram_mount || { zram_cleanup; exit 1; }
 
 zram_fill_fs
-zram_cleanup
+zram_cleanup || ERR_CODE=1
 
 if [ $ERR_CODE -ne 0 ]; then
 	echo "$TCID : [FAIL]"
+	exit 1
 else
 	echo "$TCID : [PASS]"
 fi
