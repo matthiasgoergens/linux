@@ -28,6 +28,7 @@ zram02.sh: creates block device for swap
 Offload-only swap tests, registered separately:
 zram03.sh: checks proactive routing, pressure fallback and zswap bypass
 zram04.sh: checks file workingset activation with offload-only swap
+zram05.sh: checks retained-entry write refusal, recovery and data integrity
 
 Run these tests as root in an exclusive disposable VM with the offload-only
 swap policy and the options listed in config. They change global swap,
@@ -35,7 +36,9 @@ zswap and reclaim settings. Use the initial cgroup namespace with an
 unrestricted cgroup v2 memory hierarchy mounted at /sys/fs/cgroup. A child's
 memory.zswap.writeback value does not reveal restrictions in its ancestors.
 
-zram04 needs a disk-backed TMPDIR.
+zram04 needs a disk-backed TMPDIR. zram05 additionally needs dm-delay,
+transparent huge pages and enough locked-memory allowance for its fixture;
+it skips when those prerequisites cannot be established.
 
 Commands required for testing:
  - bc
