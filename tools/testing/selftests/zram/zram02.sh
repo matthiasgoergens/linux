@@ -29,16 +29,17 @@ zram_sizes="1048576" # 1M
 zram_mem_limits="1M"
 
 check_prereqs
-zram_load
+zram_load || { zram_cleanup; exit 1; }
 zram_max_streams
 zram_set_disksizes
 zram_set_memlimit
 zram_makeswap
 zram_swapoff
-zram_cleanup
+zram_cleanup || ERR_CODE=1
 
 if [ $ERR_CODE -ne 0 ]; then
 	echo "$TCID : [FAIL]"
+	exit 1
 else
 	echo "$TCID : [PASS]"
 fi
