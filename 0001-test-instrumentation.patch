@@ -1,0 +1,224 @@
+From ad22d403dfb1aa0140c90a3d4e42107fddb6d9a7 Mon Sep 17 00:00:00 2001
+From: Matthias Goergens <matthias.goergens@gmail.com>
+Date: Fri, 25 Sep 2026 22:55:48 +0800
+Subject: [PATCH] TEMP TEST INSTRUMENTATION: PF_MEMALLOC counters, drop_slab
+ under memalloc_noreclaim_save
+
+Not for posting.  Used to test "fs: Deferred inode reclaim" v2 against
+its base.
+---
+ fs/buffer.c            | 10 ++++++++++
+ fs/drop_caches.c       | 14 ++++++++++++++
+ fs/ext4/inode.c        | 14 ++++++++++++++
+ fs/inode.c             | 10 ++++++++++
+ include/linux/dbgpfm.h | 26 ++++++++++++++++++++++++++
+ mm/page_alloc.c        | 11 +++++++++++
+ 6 files changed, 85 insertions(+)
+ create mode 100644 include/linux/dbgpfm.h
+
+diff --git a/fs/buffer.c b/fs/buffer.c
+index ed966fa73b1b..6f88196c561c 100644
+--- a/fs/buffer.c
++++ b/fs/buffer.c
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include <linux/kernel.h>
++#include <linux/dbgpfm.h>
+ #include <linux/sched/signal.h>
+ #include <linux/syscalls.h>
+ #include <linux/fs.h>
+@@ -855,6 +856,15 @@ static bool grow_dev_folio(struct block_device *bdev, sector_t block,
+ 	struct buffer_head *bh;
+ 	sector_t end_block = 0;
+ 
++	if (current->flags & PF_MEMALLOC) {
++		long n = dbgpfm_hit(DBGPFM_GROW);
++
++		pr_info_ratelimited("DBGPFM grow n=%ld %pg block=%llu comm=%s\n",
++				    n, bdev, (unsigned long long)block,
++				    current->comm);
++		if (n <= 3)
++			dump_stack();
++	}
+ 	folio = __filemap_get_folio(mapping, index,
+ 			FGP_LOCK | FGP_ACCESSED | FGP_CREAT, gfp);
+ 	if (IS_ERR(folio))
+diff --git a/fs/drop_caches.c b/fs/drop_caches.c
+index 49f56a598ecb..c9b517f8f5fc 100644
+--- a/fs/drop_caches.c
++++ b/fs/drop_caches.c
+@@ -11,6 +11,8 @@
+ #include <linux/sysctl.h>
+ #include <linux/gfp.h>
+ #include <linux/swap.h>
++#include <linux/sched/mm.h>
++#include <linux/dbgpfm.h>
+ #include "internal.h"
+ 
+ /* A global variable is a bit ugly, but it keeps the code simple */
+@@ -65,7 +67,11 @@ static int drop_caches_sysctl_handler(const struct ctl_table *table, int write,
+ 			count_vm_event(DROP_PAGECACHE);
+ 		}
+ 		if (sysctl_drop_caches & 2) {
++			/* TEMP: evict in reclaim context, like direct reclaim */
++			unsigned int noreclaim = memalloc_noreclaim_save();
++
+ 			drop_slab();
++			memalloc_noreclaim_restore(noreclaim);
+ 			count_vm_event(DROP_SLAB);
+ 		}
+ 		if (!stfu) {
+@@ -74,6 +80,14 @@ static int drop_caches_sysctl_handler(const struct ctl_table *table, int write,
+ 				sysctl_drop_caches);
+ 		}
+ 		stfu |= sysctl_drop_caches & 4;
++		if (sysctl_drop_caches == 4)
++			pr_info("DBGPFM totals nofail=%ld grow=%ld iloc=%ld evict=%ld evict_unlinked=%ld ext4_delete=%ld\n",
++				atomic_long_read(&dbgpfm_ctr[DBGPFM_NOFAIL]),
++				atomic_long_read(&dbgpfm_ctr[DBGPFM_GROW]),
++				atomic_long_read(&dbgpfm_ctr[DBGPFM_ILOC]),
++				atomic_long_read(&dbgpfm_ctr[DBGPFM_EVICT]),
++				atomic_long_read(&dbgpfm_ctr[DBGPFM_EVICT_UNLINKED]),
++				atomic_long_read(&dbgpfm_ctr[DBGPFM_EXT4_DELETE]));
+ 	}
+ 	return 0;
+ }
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index 26f0f9714f03..74ee9792c1fb 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include <linux/fs.h>
++#include <linux/dbgpfm.h>
+ #include <linux/mount.h>
+ #include <linux/time.h>
+ #include <linux/highuid.h>
+@@ -204,6 +205,15 @@ void ext4_evict_inode(struct inode *inode)
+ 
+ 	if (is_bad_inode(inode))
+ 		goto no_delete;
++	if (current->flags & PF_MEMALLOC) {
++		long n = dbgpfm_hit(DBGPFM_EXT4_DELETE);
++
++		pr_info_ratelimited("DBGPFM ext4_delete n=%ld %s ino=%lu comm=%s\n",
++				    n, inode->i_sb->s_id, inode->i_ino,
++				    current->comm);
++		if (n <= 3)
++			dump_stack();
++	}
+ 	dquot_initialize(inode);
+ 
+ 	if (ext4_should_order_data(inode))
+@@ -4896,6 +4906,10 @@ static int __ext4_get_inode_loc(struct super_block *sb, unsigned long ino,
+ 	    ino > le32_to_cpu(EXT4_SB(sb)->s_es->s_inodes_count))
+ 		return -EFSCORRUPTED;
+ 
++	if (current->flags & PF_MEMALLOC)
++		pr_info_ratelimited("DBGPFM iloc n=%ld %s ino=%lu comm=%s\n",
++				    dbgpfm_hit(DBGPFM_ILOC), sb->s_id, ino,
++				    current->comm);
+ 	iloc->block_group = (ino - 1) / EXT4_INODES_PER_GROUP(sb);
+ 	gdp = ext4_get_group_desc(sb, iloc->block_group, NULL);
+ 	if (!gdp)
+diff --git a/fs/inode.c b/fs/inode.c
+index ba7da39be4a3..8fe43cf28eec 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -5,6 +5,7 @@
+  */
+ #include <linux/export.h>
+ #include <linux/fs.h>
++#include <linux/dbgpfm.h>
+ #include <linux/filelock.h>
+ #include <linux/mm.h>
+ #include <linux/backing-dev.h>
+@@ -800,6 +801,15 @@ static void evict(struct inode *inode)
+ {
+ 	const struct super_operations *op = inode->i_sb->s_op;
+ 
++	if (current->flags & PF_MEMALLOC) {
++		dbgpfm_hit(DBGPFM_EVICT);
++		if (!inode->i_nlink)
++			pr_info_ratelimited("DBGPFM evict_unlinked n=%ld %s ino=%lu comm=%s\n",
++					    dbgpfm_hit(DBGPFM_EVICT_UNLINKED),
++					    inode->i_sb->s_id, inode->i_ino,
++					    current->comm);
++	}
++
+ 	BUG_ON(!(inode_state_read_once(inode) & I_FREEING));
+ 	BUG_ON(!list_empty(&inode->i_lru));
+ 
+diff --git a/include/linux/dbgpfm.h b/include/linux/dbgpfm.h
+new file mode 100644
+index 000000000000..38cfa0b7346e
+--- /dev/null
++++ b/include/linux/dbgpfm.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * TEMP TEST INSTRUMENTATION -- NOT FOR POSTING.
++ * Counters for work done under PF_MEMALLOC (reclaim context), used to test
++ * "fs: Deferred inode reclaim" v2 against its base.
++ */
++#ifndef _LINUX_DBGPFM_H
++#define _LINUX_DBGPFM_H
++#include <linux/types.h>
++#include <linux/atomic.h>
++
++enum {
++	DBGPFM_NOFAIL,		/* __GFP_NOFAIL slowpath entry with PF_MEMALLOC */
++	DBGPFM_GROW,		/* grow_dev_folio() under PF_MEMALLOC */
++	DBGPFM_ILOC,		/* __ext4_get_inode_loc() under PF_MEMALLOC */
++	DBGPFM_EVICT,		/* evict() under PF_MEMALLOC */
++	DBGPFM_EVICT_UNLINKED,	/* ... of an inode with i_nlink == 0 */
++	DBGPFM_EXT4_DELETE,	/* ext4_evict_inode() deletion path */
++	DBGPFM_NR
++};
++extern atomic_long_t dbgpfm_ctr[DBGPFM_NR];
++static inline long dbgpfm_hit(int i)
++{
++	return atomic_long_inc_return(&dbgpfm_ctr[i]);
++}
++#endif
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 12fac9084c48..2b2a6ab1da5d 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -15,6 +15,7 @@
+  */
+ 
+ #include <linux/stddef.h>
++#include <linux/dbgpfm.h>
+ #include <linux/mm.h>
+ #include <linux/highmem.h>
+ #include <linux/interrupt.h>
+@@ -4350,6 +4351,10 @@ should_compact_retry(gfp_t gfp_mask, struct alloc_context *ac, int order,
+ }
+ #endif /* CONFIG_COMPACTION */
+ 
++/* TEMP TEST INSTRUMENTATION */
++atomic_long_t dbgpfm_ctr[DBGPFM_NR];
++EXPORT_SYMBOL(dbgpfm_ctr);
++
+ #ifdef CONFIG_LOCKDEP
+ static struct lockdep_map __fs_reclaim_map =
+ 	STATIC_LOCKDEP_MAP_INIT("fs_reclaim", &__fs_reclaim_map);
+@@ -4813,6 +4818,12 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ 		 * because we cannot reclaim anything and only can loop waiting
+ 		 * for somebody to do a work for us.
+ 		 */
++		if (current->flags & PF_MEMALLOC) {
++			long n = dbgpfm_hit(DBGPFM_NOFAIL);
++
++			pr_info_ratelimited("DBGPFM nofail n=%ld comm=%s\n",
++					    n, current->comm);
++		}
+ 		WARN_ON_ONCE(current->flags & PF_MEMALLOC);
+ 	}
+ 
+-- 
+2.55.0
+
