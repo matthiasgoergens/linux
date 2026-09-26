@@ -1,0 +1,8 @@
+## gen-extra.py base64.img r1-short-rl.img short-rl 65 16
+in base64.img: cluster 4096, record 65 (pad)
+before: lowest_vcn 0 highest_vcn 63 alloc 262144 data 262144 init 262144, 64 runs ending at vcn 64, first [(0, 1, 4609)] last [(63, 1, 4735)]
+after:  lowest_vcn 0 highest_vcn 0 alloc 262144 data 262144 init 262144, 16 runs ending at vcn 16, first [(0, 1, 4609)] last [(15, 1, 4639)]
+## gen-extra.py base64.img r2-alloc-unaligned.img alloc-unaligned 65 16 904
+in base64.img: cluster 4096, record 65 (pad)
+before: lowest_vcn 0 highest_vcn 63 alloc 262144 data 262144 init 262144, 64 runs ending at vcn 64, first [(0, 1, 4609)] last [(63, 1, 4735)]
+after:  lowest_vcn 0 highest_vcn 0 alloc 66440 data 66440 init 66440, 16 runs ending at vcn 16, first [(0, 1, 4609)] last [(15, 1, 4639)]

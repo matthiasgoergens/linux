@@ -1,0 +1,4 @@
+*.img
+*.cpio.gz
+mkfrag
+__pycache__/

@@ -1,0 +1,71 @@
+#!/bin/sh
+# rw checks on c512.img (512-byte clusters, so a 4 KiB folio spans eight
+# clusters and the last folio of a file usually runs past allocated_size).
+# Every probe is /rt, whose output is deterministic, so the logs of two
+# kernels can be diffed (grep '^RT\|^CASE').
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+dmesg -n 1
+echo "=== VM TEST START (odd) ==="
+echo 30 > /proc/sys/kernel/hung_task_timeout_secs
+mkdir -p /mnt
+M=/mnt
+dc() { sync; echo 3 > /proc/sys/vm/drop_caches; echo "CASE -- drop_caches"; }
+mount -t ntfs /dev/vda $M && echo "MOUNT RW OK" || { echo "MOUNT FAILED"; dmesg | grep -iE 'ntfs|kasan|BUG|WARNING'; poweroff -f; }
+echo "CASE O1 5000-byte file: write, cold read, mmap read"
+/rt w $M/o1 0 5000 O
+/rt sz $M/o1
+dc
+/rt h $M/o1
+/rt r $M/o1 4096 4096
+/rt mr $M/o1 0 5000
+echo "CASE O2 shrink 65536 -> 9000, cold read, extend to 20000, cold read"
+/rt w $M/o2 0 65536 Q
+/rt tr $M/o2 9000
+dc
+/rt h $M/o2
+/rt tr $M/o2 20000
+/rt w $M/o2 18000 1000 R
+dc
+/rt h $M/o2
+/rt r $M/o2 8192 12288
+echo "CASE O3 fallocate KEEP_SIZE past a 3000-byte EOF, cold read, write into it"
+/rt w $M/o3 0 3000 K
+/rt fa $M/o3 keep 3000 5000
+/rt sz $M/o3
+dc
+/rt h $M/o3
+/rt w $M/o3 3000 2500 L
+dc
+/rt h $M/o3
+echo "CASE O4 fallocate mode 0 to 7777 bytes, cold read"
+/rt w $M/o4 0 1000 A
+/rt fa $M/o4 alloc 0 7777
+/rt sz $M/o4
+dc
+/rt h $M/o4
+echo "CASE O5 sparse: write 700 bytes at 10000, cold read"
+/rt cx $M/o5 0x200
+/rt w $M/o5 10000 700 S
+dc
+/rt h $M/o5
+echo "CASE O6 compressed: 70000 bytes, cold read"
+/rt cx $M/o6 0x800
+/rt w $M/o6 0 70000 C
+dc
+/rt h $M/o6
+/rt r $M/o6 65536 8192
+echo "CASE O7 victim and pad (ntfs-3g written), cold read"
+/rt h $M/victim
+/rt h $M/pad
+sync
+umount $M; echo "umount rc=$?"
+echo "CASE RO remount, final hashes"
+mount -t ntfs -o ro /dev/vda $M && echo "REMOUNT RO OK"
+for f in o1 o2 o3 o4 o5 o6 victim pad; do /rt h $M/$f; done
+umount $M
+echo "--- dmesg ---"
+dmesg | grep -iE 'ntfs|kasan|ubsan|BUG|WARNING|lockdep|circular|hung'
+echo "=== VM TEST END ==="
+poweroff -f

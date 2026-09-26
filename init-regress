@@ -1,0 +1,144 @@
+#!/bin/sh
+# Regression matrix for the zero-read fix, on the CLEAN image, rw mount.
+# Every probe is /rt (rt.c), whose output is deterministic, so logs from
+# different kernels can be diffed line by line (grep '^RT\|^CASE').
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+dmesg -n 1  # keep printk off the console so RT lines are not split; dmesg is dumped at the end
+echo "=== VM TEST START (regress) ==="
+mkdir -p /mnt
+M=/mnt
+dc() { sync; echo 3 > /proc/sys/vm/drop_caches; echo "CASE -- drop_caches"; }
+mount -t ntfs /dev/vda $M && echo "MOUNT RW OK" || { echo "MOUNT FAILED"; poweroff -f; }
+
+echo "CASE R0 baseline, fresh mount, whole-file reads"
+/rt h $M/victim; /rt h $M/pad
+
+echo "CASE M1 mmap: truncate-up new file, mmap-write blocks 0 and 10, read gap"
+/rt tr $M/m1 65536
+/rt mw $M/m1 0 4096 M
+/rt mw $M/m1 40960 4096 N
+/rt r $M/m1 0 65536
+/rt mr $M/m1 0 65536
+dc
+/rt r $M/m1 0 65536
+echo "CASE M2 mmap read of the whole multi-extent victim"
+/rt mr $M/victim 0 6144000
+echo "CASE M3 mmap write into victim vcn 1100 (extent-record range)"
+/rt mw $M/victim 4505600 8192 A
+/rt r $M/victim 4497408 24576
+
+echo "CASE D1 O_DIRECT: new file, write blk 0-1, then blk 20 past EOF, read gap"
+/rt w $M/d1 0 8192 D d
+/rt w $M/d1 81920 4096 E d
+/rt r $M/d1 8192 8192 d
+/rt r $M/d1 0 86016
+dc
+/rt r $M/d1 0 86016 d
+echo "CASE D2 O_DIRECT write into victim vcn 1000-1001, DIO read back, DIO whole-file read"
+/rt w $M/victim 4096000 8192 W d
+/rt r $M/victim 4096000 8192 d
+/rt r $M/victim 0 6144000 d
+
+echo "CASE F1 fallocate mode 0 extending a file, read gap, write in allocated range"
+/rt w $M/f1 0 8192 F
+/rt fa $M/f1 alloc 0 1048576
+/rt sz $M/f1
+/rt r $M/f1 8192 16384
+/rt w $M/f1 524288 4096 G
+/rt r $M/f1 0 1048576
+echo "CASE F2 fallocate KEEP_SIZE beyond EOF, then write into it"
+/rt fa $M/f1 keep 1048576 1048576
+/rt sz $M/f1
+/rt w $M/f1 1114112 4096 H
+/rt sz $M/f1
+/rt r $M/f1 1040384 81920
+dc
+/rt r $M/f1 1040384 81920
+echo "CASE F3 PUNCH_HOLE in a new file and in victim vcn 500-503"
+/rt w $M/f2 0 65536 P
+/rt fa $M/f2 punch 16384 16384
+/rt r $M/f2 0 65536
+/rt fa $M/victim punch 2048000 16384
+/rt r $M/victim 2031616 32768
+dc
+/rt r $M/f2 0 65536
+/rt r $M/victim 2031616 32768
+echo "CASE F4 INSERT_RANGE and COLLAPSE_RANGE"
+/rt fa $M/f2 insert 32768 8192
+/rt h $M/f2
+/rt fa $M/f2 collapse 32768 8192
+/rt h $M/f2
+
+echo "CASE T1 truncate-up, write beyond old size, read gap"
+/rt w $M/t1 0 8192 T
+/rt tr $M/t1 1048576
+/rt w $M/t1 524288 4096 U
+/rt r $M/t1 8192 16384
+/rt r $M/t1 0 1048576
+dc
+/rt r $M/t1 0 1048576
+echo "CASE T2 truncate-up victim 6144000 -> 8388608, write at 7340032, read gap"
+/rt tr $M/victim 8388608
+/rt w $M/victim 7340032 4096 Y
+/rt r $M/victim 6144000 20480
+/rt r $M/victim 7331840 16384
+dc
+/rt r $M/victim 6144000 20480
+
+echo "CASE S1 sparse flag via system.ntfs_attrib, write at 1 MiB, read gap"
+/rt cx $M/s1 0x200
+/rt w $M/s1 1048576 4096 S
+/rt r $M/s1 0 8192
+/rt sz $M/s1
+dc
+/rt h $M/s1
+
+echo "CASE C1 compressed file (system.ntfs_attrib 0x800), write 0-64K and 256K-320K"
+/rt cx $M/c1 0x800
+/rt w $M/c1 0 65536 C
+/rt w $M/c1 262144 65536 K
+/rt h $M/c1
+dc
+/rt h $M/c1
+/rt r $M/c1 131072 65536
+echo "CASE C2 compressed multi-extent file: 300 x 64K appends interleaved with a 4K file (failures only)"
+/rt cx $M/c2 0x800
+i=0
+while [ $i -lt 300 ]; do
+	/rt w $M/c2 $((i * 65536)) 65536 C | grep --invert-match 'errno=0$'
+	/rt w $M/p2 $((i * 4096)) 4096 Q | grep --invert-match 'errno=0$'
+	i=$((i + 1))
+done
+/rt h $M/c2
+/rt h $M/p2
+
+echo "CASE PRE-UMOUNT hashes"
+sync
+for f in victim pad m1 d1 f1 f2 t1 s1 c1 c2 p2; do /rt h $M/$f; done
+umount $M; echo "umount rc=$?"
+
+echo "CASE X fresh rw mount: first access to victim is a write at vcn 1200"
+mount -t ntfs /dev/vda $M && echo "MOUNT RW OK"
+/rt w $M/victim 4915200 4096 R
+/rt r $M/victim 0 4096
+/rt r $M/victim 880640 4096
+/rt r $M/victim 4915200 4096
+echo "CASE X2 first access to c2 is a pread in the middle"
+/rt r $M/c2 9830400 65536
+/rt h $M/c2
+echo "CASE X3 first access to pad is an mmap write at vcn 1400"
+/rt mw $M/pad 5734400 4096 B
+/rt r $M/pad 5730304 12288
+sync
+umount $M; echo "umount rc=$?"
+
+echo "CASE RO remount, final hashes"
+mount -t ntfs -o ro /dev/vda $M && echo "REMOUNT RO OK"
+for f in victim pad m1 d1 f1 f2 t1 s1 c1 c2 p2; do /rt h $M/$f; done
+umount $M
+echo "--- dmesg ---"
+dmesg | grep -iE 'ntfs|kasan|ubsan|BUG|WARNING|lockdep|circular|ntfs-diag'
+echo "=== VM TEST END ==="
+poweroff -f

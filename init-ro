@@ -1,0 +1,25 @@
+#!/bin/sh
+# Read-only check of r1-short-rl.img, r2-alloc-unaligned.img and base64.img:
+# /pad is the crafted file (content id 0x50), /victim the untouched control
+# (id 0x56).  rdcheck classifies every block as OK, ZERO, BAD or ERR.
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+echo "=== VM TEST START (ro) ==="
+echo 30 > /proc/sys/kernel/hung_task_timeout_secs
+uname -a
+mkdir -p /mnt
+mount -t ntfs -o ro /dev/vda /mnt && echo "MOUNT OK" || { echo "MOUNT FAILED"; dmesg | grep -iE 'ntfs|kasan|BUG|WARNING'; echo "=== VM TEST END ==="; poweroff -f; }
+ls -l /mnt
+echo "--- pad seq ---"
+/rdcheck /mnt/pad 50 seq
+echo "--- pad pread at vcn 16 and vcn 40 ---"
+/rdcheck /mnt/pad 50 pread 65536
+/rdcheck /mnt/pad 50 pread 163840
+echo "--- victim seq (control) ---"
+/rdcheck /mnt/victim 56 seq
+umount /mnt && echo "UMOUNT OK"
+echo "--- dmesg ---"
+dmesg | grep -iE 'ntfs|kasan|ubsan|BUG|WARNING|lockdep|circular|hung|iter.c'
+echo "=== VM TEST END ==="
+poweroff -f

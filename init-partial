@@ -1,0 +1,30 @@
+#!/bin/sh
+# sp512.img: /sp is sparse, 512-byte clusters, $DATA in 18 extents, size
+# 3072700, allocated_size 3073024 (vcn 6002), last extent vcn 5919-6001.
+# P1: first access is a buffered write into the last extent, which maps only
+# that extent; then read the file's last folio, which runs past
+# allocated_size.  P2: the same read on a fresh mount (control).
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+dmesg -n 1
+echo "=== VM TEST START (partial) ==="
+echo 30 > /proc/sys/kernel/hung_task_timeout_secs
+mkdir -p /mnt
+M=/mnt
+mount -t ntfs /dev/vda $M && echo "MOUNT RW OK" || { echo "MOUNT FAILED"; dmesg | grep -iE 'ntfs|kasan|BUG|WARNING'; poweroff -f; }
+echo "CASE P1 write into the last extent first, then read the last folio"
+/rt w $M/sp 3040256 512 S
+/rt r $M/sp 3072000 700
+/rt r $M/sp 3068928 3772
+/rt h $M/sp
+umount $M; echo "umount rc=$?"
+echo "CASE P2 fresh mount, read the last folio first"
+mount -t ntfs -o ro /dev/vda $M && echo "MOUNT RO OK"
+/rt r $M/sp 3072000 700
+/rt h $M/sp
+umount $M
+echo "--- dmesg ---"
+dmesg | grep -iE 'ntfs|kasan|ubsan|BUG|WARNING|lockdep|circular|hung'
+echo "=== VM TEST END ==="
+poweroff -f

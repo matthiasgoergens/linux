@@ -1,0 +1,41 @@
+#!/bin/sh
+# Compressed files on a volume mounted with disable_sparse: extend by
+# writing, then read back (base64.img, 4 KiB clusters).
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+dmesg -n 1
+echo "=== VM TEST START (dsparse) ==="
+echo 30 > /proc/sys/kernel/hung_task_timeout_secs
+mkdir -p /mnt
+M=/mnt
+dc() { sync; echo 3 > /proc/sys/vm/drop_caches; echo "CASE -- drop_caches"; }
+mount -t ntfs -o disable_sparse /dev/vda $M && echo "MOUNT RW OK" || { echo "MOUNT FAILED"; dmesg | grep -iE 'ntfs|kasan|BUG|WARNING'; poweroff -f; }
+echo "CASE D1 compressed: write 0-64K, then 64K-128K, then 256K-260K"
+/rt cx $M/c1 0x800
+/rt w $M/c1 0 65536 C
+/rt w $M/c1 65536 65536 D
+/rt w $M/c1 262144 4096 E
+/rt sz $M/c1
+/rt h $M/c1
+dc
+/rt h $M/c1
+echo "CASE D2 compressed: truncate up to 200000, read, write at 190000"
+/rt cx $M/c2 0x800
+/rt w $M/c2 0 4096 F
+/rt tr $M/c2 200000
+/rt h $M/c2
+/rt w $M/c2 190000 4096 G
+dc
+/rt h $M/c2
+sync
+umount $M; echo "umount rc=$?"
+echo "CASE RO remount"
+mount -t ntfs -o ro /dev/vda $M && echo "REMOUNT RO OK"
+/rt h $M/c1
+/rt h $M/c2
+umount $M
+echo "--- dmesg ---"
+dmesg | grep -iE 'ntfs|kasan|ubsan|BUG|WARNING|lockdep|circular|hung'
+echo "=== VM TEST END ==="
+poweroff -f
