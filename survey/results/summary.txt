@@ -1,0 +1,153 @@
+images scanned: 8264  status: {'no-joliet': 4257, 'joliet': 3338, 'error': 669}
+items with >=1 Joliet image: 2546
+
+per pool (images): joliet / no-joliet / error ; images with >255 ; images with >64 units
+  ara           15 /    19 /    0 ;   0 ;    1
+  chi          144 /   175 /   11 ;   0 ;    2
+  chi3         405 /   482 /   33 ;   0 ;   12
+  ebook        362 /   161 /   86 ;   0 ;   19
+  gre           14 /    21 /    0 ;   0 ;    1
+  heb            9 /    24 /    2 ;   0 ;    0
+  indic        211 /   106 /    4 ;   0 ;   15
+  indic-kw      35 /    47 /   12 ;   0 ;    5
+  indic2        11 /     1 /    0 ;   0 ;    1
+  ja-kw        377 /   168 /   29 ;   0 ;   23
+  ja2            5 /     6 /    3 ;   0 ;    0
+  jpn           89 /   207 /   49 ;   0 ;    0
+  jpn3         255 /   577 /  103 ;   0 ;    2
+  karaoke      130 /   527 /   34 ;   0 ;    7
+  ko-kw         20 /    27 /    0 ;   0 ;    1
+  ko2            0 /     2 /    0 ;   0 ;    0
+  kor           88 /   146 /   10 ;   0 ;    0
+  kor3         182 /   297 /   34 ;   0 ;    1
+  mp3cjk       143 /   250 /   67 ;   0 ;   12
+  other3b        7 /    14 /    3 ;   0 ;    0
+  rus           49 /    21 /    5 ;   0 ;    1
+  same-uploader     2 /     0 /    0 ;   0 ;    0
+  sea-other      2 /     4 /    0 ;   0 ;    0
+  tha          125 /   103 /   16 ;   0 ;    3
+  tha-kw       151 /   258 /   73 ;   0 ;   11
+  tha2           1 /     3 /    0 ;   0 ;    0
+  vie          108 /   345 /   16 ;   0 ;    1
+  vie-kw        52 /    93 /   13 ;   0 ;    3
+  vie2           8 /    18 /    6 ;   0 ;    0
+  zh-kw        301 /   130 /   37 ;   0 ;    4
+  zh2           37 /    25 /   23 ;   0 ;    1
+
+histogram of per-image max UTF-16 units (Joliet images):
+     0: 4
+     5: 6
+     6: 22
+     8: 3
+     9: 21
+    10: 8
+    11: 58
+    12: 343
+    13: 89
+    14: 392
+    15: 107
+    16: 74
+    17: 87
+    18: 88
+    19: 71
+    20: 98
+    21: 55
+    22: 106
+    23: 94
+    24: 82
+    25: 78
+    26: 72
+    27: 83
+    28: 62
+    29: 72
+    30: 91
+    31: 52
+    32: 67
+    33: 52
+    34: 43
+    35: 43
+    36: 46
+    37: 26
+    38: 43
+    39: 46
+    40: 29
+    41: 55
+    42: 26
+    43: 15
+    44: 29
+    45: 27
+    46: 19
+    47: 37
+    48: 25
+    49: 17
+    50: 19
+    51: 15
+    52: 14
+    53: 12
+    54: 19
+    55: 14
+    56: 12
+    57: 13
+    58: 22
+    59: 19
+    60: 16
+    61: 13
+    62: 9
+    63: 6
+    64: 46
+    65: 9
+    66: 39
+    67: 3
+    68: 7
+    69: 3
+    70: 4
+    71: 5
+    72: 1
+    73: 4
+    74: 4
+    75: 4
+    76: 2
+    77: 1
+    78: 7
+    79: 1
+    80: 2
+    82: 1
+    84: 1
+    86: 1
+    88: 5
+    94: 1
+    96: 2
+    99: 1
+   100: 1
+   101: 3
+   103: 1
+   105: 1
+   109: 1
+   110: 11
+
+histogram of per-image max kernel UTF-8 bytes (bucket of 32):
+     0-  31: 2156
+    32-  63: 940
+    64-  95: 171
+    96- 127: 42
+   128- 159: 14
+   160- 191: 13
+   192- 223: 2
+
+names > 255 UTF-8 bytes: 0 in 0 images
+  by script: []
+  by tool:   []
+  directories affected: 0; colliding after 255-byte cap: 0 names in 0 dirs
+
+names with >85 units or >192 bytes (above-spec): 766 in 28 images
+  by script: [('none', 736), ('Gujarati', 17), ('General punctuation', 11), ('Han', 2)]
+
+Joliet images by tool: [('unknown', 868), ('Nero', 660), ('other', 330), ('Roxio/Adaptec', 304), ('PowerISO', 280), ('UltraISO', 272), ('oscdimg/cdimage', 162), ('mkisofs/genisoimage', 126), ('IMAPI', 61), ('Primo/Prassi', 52), ('Sonic/RecordNow', 47), ('ImgBurn', 38), ('Gear', 37), ('xorriso/libisofs', 27), ('WinISO', 22), ('MagicISO', 20), ('AnyBurn', 10), ('CDBurnerXP', 6), ('CDEverywhere (sysid)', 5), ('BurnAware', 5), ('Ashampoo', 3), ('Padus DiscJuggler', 2), ('InfraRecorder', 1)]
+images with >64-unit names by tool: [('other', 39), ('Nero', 22), ('PowerISO', 16), ('UltraISO', 11), ('xorriso/libisofs', 11), ('oscdimg/cdimage', 6), ('unknown', 6), ('MagicISO', 5), ('IMAPI', 4), ('WinISO', 2), ('mkisofs/genisoimage', 2), ('ImgBurn', 1), ('Sonic/RecordNow', 1)]
+
+non-UTF-8 iocharsets (uni16_to_x8, unmappable -> 1 byte): names > 255 bytes: {}
+
+empty directory sectors (first byte 0, within data length):
+  primary tree: 98 of 7595 images, 1469 sectors of 832834 examined
+  joliet tree:  15 of 3338 images, 52 sectors of 467326 examined
+  images with empty sectors by tool: [('Roxio/Adaptec', 76), ('Nero', 15), ('unknown', 9), ('other', 6), ('CDEverywhere (sysid)', 2)]
