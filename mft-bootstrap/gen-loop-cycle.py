@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate an NTFS image (fs/ntfs) that hangs the SENT patch (4339904a77cb).
+Generate an NTFS image (fs/ntfs) that hangs v1 of the $MFT extent patch as mailed.
 
-The sent patch sets NVolMftBootstrap only around ntfs_read_locked_inode()
+v1 sets NVolMftBootstrap only around ntfs_read_locked_inode()
 inside the first-$DATA-extent branch of ntfs_read_inode_mount(), and clears
 it before the extent-enumeration loop continues.  Hyunchul Lee's review says
 the loop's ntfs_attr_lookup(AT_DATA, next_vcn) -> ntfs_external_attr_find ->

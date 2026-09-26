@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Task B: the "out-of-order" $MFT layout, to test whether v2 rejects a layout
+The "out-of-order" $MFT layout, to test whether v2 rejects a layout
 that the base kernel handles.
 
 $MFT/$DATA has three extents, described in three different records:

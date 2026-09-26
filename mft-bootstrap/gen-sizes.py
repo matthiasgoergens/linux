@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 gen-sizes.py <in.img> <out.img> <mode> [args] -- craft NTFS images whose
-non-resident $DATA sizes disagree with the runlist, for the ntfs-series-v3
-LCN_ENOENT investigation.  Pure userspace; edits raw MFT records with MST
+non-resident $DATA sizes disagree with the runlist (patches 4 to 6).  Pure userspace; edits raw MFT records with MST
 fixups re-applied.  Record 0 edits are copied to $MFTMirr too, so the mirror
 check does not mask the effect.
 

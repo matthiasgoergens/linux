@@ -1,5 +1,5 @@
 /*
- * mkctl.c - positive control for ntfs-series-v3 patch 6: write, with
+ * mkctl.c - positive control for patch 6: write, with
  * libntfs-3g (userspace, no mount), two valid files whose allocated_size
  * semantics differ from a plain file:
  *   /cz  compressed (FILE_ATTR_COMPRESSED): 64 KiB compressible, 64 KiB
@@ -7,7 +7,6 @@
  *        data_size (302144) is not a multiple of the compression block
  *   /sp  written at 0 and at 8 MiB + 123, leaving a hole between
  * Usage: mkctl <image>
- * Compression is enabled the same way as ../../ntfs-compress-eoverflow/mkcomp.c.
  */
 #include "config.h"
 #include <stdio.h>

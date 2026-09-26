@@ -1,10 +1,9 @@
-# fs/ntfs: $MFT bootstrap hangs and zeros that are not on disk
+# fs/ntfs: reproducers for the $MFT bootstrap and runlist-hole series
 
 Standalone reproducers for a six-patch series against the in-kernel `ntfs`
 driver (`fs/ntfs`, not `ntfs3`), based on `ntfs-next` at `259abb551e29`
-(`https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git`).  The
-series is not yet sent; this tag exists so the patches can point at a public,
-runnable set of reproducers.  All images here are crafted or built entirely
+(`https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git`).  All
+images here are crafted or built entirely
 in userspace (raw record edits, or libntfs-3g/mkntfs with no kernel mount, no
 loop device and no FUSE); none of this was ever run against a production
 host.
@@ -232,8 +231,7 @@ those than rebuild.
 `corrupt.sh`/`corrupt-attrlist.sh` are pure record edits: given the same
 input image they are **byte-for-byte deterministic**, and every image they
 produce in this repository was regenerated and `cmp`-verified against the
-one actually used in the VM tests before being committed (see the
-assembly report for the exact commands and results).  `mkntfs` and
+one actually used in the VM tests before being committed.  `mkntfs` and
 libntfs-3g, however, embed the current time and a random volume serial
 number, so `gen-image.sh`, `gen-good.sh`, `gen-frag.sh` and
 `gen-straddle.sh` reproduce an image's **layout and mount behaviour**, not
@@ -296,9 +294,8 @@ crash the mounting kernel.
 | ctl | mounts; `/cz`, `/sp` read with the expected size and FNV-1a hash | unchanged |
 | clean | reads correctly | unchanged |
 
-These are the outcomes measured on 2026-09-26 (see the cover letter and
-`STATUS.md`'s test log in the series this tag supports); this tag does not
-re-run them, it only carries the reproducers.
+These are the outcomes measured on 2026-09-26, as reported in the series'
+cover letter; this tag only carries the reproducers.
 
 ## Layout
 
