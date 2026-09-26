@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+# build artefacts from the gen-*.sh scripts
+/runlist-holes/mkfrag
+/mft-bootstrap/fragment-mft
+/mft-bootstrap/straddle/delete-file
+/sizes/mkctl
